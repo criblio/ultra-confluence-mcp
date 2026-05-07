@@ -550,43 +550,51 @@ const GetPagesForLabelSchema = z.object({
   limit: z.coerce.number().optional(),
 });
 
-const CreatePageFromMarkdownSchema = z.object({
-  spaceId: z.string(),
-  title: z.string(),
-  markdown: z.string().optional(),
-  markdownFilePath: z.string().optional(),
-  parentId: z.string().optional(),
-  status: z.enum(["current", "draft"]).optional(),
-});
+const CreatePageFromMarkdownSchema = z
+  .object({
+    spaceId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    parentId: z.string().optional(),
+    status: z.enum(["current", "draft"]).optional(),
+  })
+  .strict();
 
-const UpdatePageFromMarkdownSchema = z.object({
-  pageId: z.string(),
-  title: z.string(),
-  markdown: z.string().optional(),
-  markdownFilePath: z.string().optional(),
-  version: z.coerce.number(),
-  status: z.enum(["current", "draft"]).optional(),
-  versionMessage: z.string().optional(),
-});
+const UpdatePageFromMarkdownSchema = z
+  .object({
+    pageId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    version: z.coerce.number(),
+    status: z.enum(["current", "draft"]).optional(),
+    versionMessage: z.string().optional(),
+  })
+  .strict();
 
-const CreatePageFromMarkdownAdfSchema = z.object({
-  spaceId: z.string(),
-  title: z.string(),
-  markdown: z.string().optional(),
-  markdownFilePath: z.string().optional(),
-  parentId: z.string().optional(),
-  status: z.enum(["current", "draft"]).optional(),
-});
+const CreatePageFromMarkdownAdfSchema = z
+  .object({
+    spaceId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    parentId: z.string().optional(),
+    status: z.enum(["current", "draft"]).optional(),
+  })
+  .strict();
 
-const UpdatePageFromMarkdownAdfSchema = z.object({
-  pageId: z.string(),
-  title: z.string(),
-  markdown: z.string().optional(),
-  markdownFilePath: z.string().optional(),
-  version: z.coerce.number(),
-  status: z.enum(["current", "draft"]).optional(),
-  versionMessage: z.string().optional(),
-});
+const UpdatePageFromMarkdownAdfSchema = z
+  .object({
+    pageId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    version: z.coerce.number(),
+    status: z.enum(["current", "draft"]).optional(),
+    versionMessage: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Resolve .md link titles in an ADF document to Confluence page URLs.
