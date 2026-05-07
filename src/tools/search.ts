@@ -99,14 +99,14 @@ export const searchTools = [
 const CqlSearchSchema = z.object({
   cql: z.string(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const SearchContentSchema = z.object({
   query: z.string(),
   spaceKey: z.string().optional(),
   type: z.enum(["page", "blogpost", "attachment"]).optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const SearchGenericContentSchema = z.object({
@@ -114,7 +114,7 @@ const SearchGenericContentSchema = z.object({
   spaceKey: z.string().optional(),
   title: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GENERIC_CONTENT_CQL_TYPE: Record<

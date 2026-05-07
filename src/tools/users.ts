@@ -56,7 +56,7 @@ const GetUserSchema = z.object({
 
 const GetUsersSchema = z.object({
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 // Tool handlers

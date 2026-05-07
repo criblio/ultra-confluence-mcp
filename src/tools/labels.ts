@@ -207,57 +207,57 @@ export const labelTools = [
 
 // Input schemas for validation
 const GetPageLabelsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   prefix: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const AddPageLabelSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   label: z.string(),
   prefix: z.string().optional(),
 });
 
 const RemovePageLabelSchema = z.object({
-  pageId: z.number(),
-  labelId: z.number(),
+  pageId: z.coerce.number(),
+  labelId: z.coerce.number(),
 });
 
 const GetBlogPostLabelsSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   prefix: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const AddBlogPostLabelSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   label: z.string(),
   prefix: z.string().optional(),
 });
 
 const RemoveBlogPostLabelSchema = z.object({
-  blogPostId: z.number(),
-  labelId: z.number(),
+  blogPostId: z.coerce.number(),
+  labelId: z.coerce.number(),
 });
 
 const GetSpaceLabelsSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   prefix: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const AddSpaceLabelSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   label: z.string(),
   prefix: z.string().optional(),
 });
 
 const RemoveSpaceLabelSchema = z.object({
-  spaceId: z.number(),
-  labelId: z.number(),
+  spaceId: z.coerce.number(),
+  labelId: z.coerce.number(),
 });
 
 // Tool handlers

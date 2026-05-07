@@ -190,29 +190,29 @@ export const commentTools = [
 
 // Input schemas for validation
 const GetPageFooterCommentsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPageInlineCommentsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   resolutionStatus: z.enum(["open", "resolved", "reopened"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetBlogPostFooterCommentsSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetFooterCommentSchema = z.object({
-  commentId: z.number(),
+  commentId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
 });
 
@@ -227,13 +227,13 @@ const CreateBlogPostFooterCommentSchema = z.object({
 });
 
 const UpdateFooterCommentSchema = z.object({
-  commentId: z.number(),
+  commentId: z.coerce.number(),
   body: z.string(),
-  version: z.number(),
+  version: z.coerce.number(),
 });
 
 const DeleteFooterCommentSchema = z.object({
-  commentId: z.number(),
+  commentId: z.coerce.number(),
 });
 
 // Tool handlers

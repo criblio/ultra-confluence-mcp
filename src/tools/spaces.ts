@@ -169,7 +169,7 @@ export const spaceTools = [
 
 // Input schemas for validation
 const GetSpacesSchema = z.object({
-  ids: z.array(z.number()).optional(),
+  ids: z.array(z.coerce.number()).optional(),
   keys: z.array(z.string()).optional(),
   type: z.enum(["global", "personal"]).optional(),
   status: z.enum(["current", "archived"]).optional(),
@@ -177,11 +177,11 @@ const GetSpacesSchema = z.object({
   sort: z.enum(["id", "-id", "key", "-key", "name", "-name"]).optional(),
   descriptionFormat: z.enum(["plain", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   descriptionFormat: z.enum(["plain", "view"]).optional(),
   includeLabels: z.boolean().optional(),
   includeProperties: z.boolean().optional(),
@@ -196,14 +196,14 @@ const CreateSpaceSchema = z.object({
 });
 
 const UpdateSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   name: z.string().optional(),
   description: z.string().optional(),
   status: z.enum(["current", "archived"]).optional(),
 });
 
 const DeleteSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
 });
 
 // Tool handlers

@@ -219,19 +219,19 @@ export const blogPostTools = [
 
 // Input schemas for validation
 const GetBlogPostsSchema = z.object({
-  spaceId: z.array(z.number()).optional(),
+  spaceId: z.array(z.coerce.number()).optional(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetBlogPostSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   getDraft: z.boolean().optional(),
-  version: z.number().optional(),
+  version: z.coerce.number().optional(),
   includeLabels: z.boolean().optional(),
   includeProperties: z.boolean().optional(),
   includeVersions: z.boolean().optional(),
@@ -248,24 +248,24 @@ const UpdateBlogPostSchema = z.object({
   blogPostId: z.string(),
   title: z.string(),
   body: z.string(),
-  version: z.number(),
+  version: z.coerce.number(),
   status: z.enum(["current", "draft"]).optional(),
   versionMessage: z.string().optional(),
 });
 
 const DeleteBlogPostSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   purge: z.boolean().optional(),
   draft: z.boolean().optional(),
 });
 
 const GetBlogPostsInSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 // Tool handlers

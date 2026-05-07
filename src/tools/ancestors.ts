@@ -28,8 +28,8 @@ export const ancestorTools = [
 
 // Input schemas for validation
 const GetPageAncestorsSchema = z.object({
-  pageId: z.number(),
-  limit: z.number().optional(),
+  pageId: z.coerce.number(),
+  limit: z.coerce.number().optional(),
 });
 
 // Tool handlers

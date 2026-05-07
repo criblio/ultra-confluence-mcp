@@ -489,19 +489,19 @@ export const pageTools = [
 
 // Input schemas for validation
 const GetPagesSchema = z.object({
-  spaceId: z.array(z.number()).optional(),
+  spaceId: z.array(z.coerce.number()).optional(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPageSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   getDraft: z.boolean().optional(),
-  version: z.number().optional(),
+  version: z.coerce.number().optional(),
   includeLabels: z.boolean().optional(),
   includeProperties: z.boolean().optional(),
   includeVersions: z.boolean().optional(),
@@ -521,33 +521,33 @@ const UpdatePageSchema = z.object({
   title: z.string(),
   body: z.string(),
   bodyFormat: z.enum(["storage", "atlas_doc_format"]).optional(),
-  version: z.number(),
+  version: z.coerce.number(),
   status: z.enum(["current", "draft"]).optional(),
   versionMessage: z.string().optional(),
 });
 
 const DeletePageSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   purge: z.boolean().optional(),
   draft: z.boolean().optional(),
 });
 
 const GetPagesInSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   depth: z.enum(["all", "root"]).optional(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPagesForLabelSchema = z.object({
-  labelId: z.number(),
-  spaceId: z.array(z.number()).optional(),
+  labelId: z.coerce.number(),
+  spaceId: z.array(z.coerce.number()).optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const CreatePageFromMarkdownSchema = z.object({
@@ -564,7 +564,7 @@ const UpdatePageFromMarkdownSchema = z.object({
   title: z.string(),
   markdown: z.string().optional(),
   markdownFilePath: z.string().optional(),
-  version: z.number(),
+  version: z.coerce.number(),
   status: z.enum(["current", "draft"]).optional(),
   versionMessage: z.string().optional(),
 });
@@ -583,7 +583,7 @@ const UpdatePageFromMarkdownAdfSchema = z.object({
   title: z.string(),
   markdown: z.string().optional(),
   markdownFilePath: z.string().optional(),
-  version: z.number(),
+  version: z.coerce.number(),
   status: z.enum(["current", "draft"]).optional(),
   versionMessage: z.string().optional(),
 });
