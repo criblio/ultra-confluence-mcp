@@ -36,6 +36,13 @@ const NAMED_ENTITIES: Record<string, string> = {
   hellip: "…",
 };
 
+/**
+ * Per-call sentinel sequence — kept long and distinctive so it cannot
+ * appear naturally in either Confluence storage XHTML or markdown output.
+ */
+const PLACEHOLDER_PREFIX = " __PROTECTED_BLOCK_";
+const PLACEHOLDER_SUFFIX = "__ ";
+
 export function storageXhtmlToMarkdown(input: string): string {
   if (typeof input !== "string" || input.length === 0) return "";
 
@@ -44,8 +51,12 @@ export function storageXhtmlToMarkdown(input: string): string {
   //    on a literal '>' that's actually part of an attribute value.
   let text = encodeAngleBracketsInAttrs(input);
 
-  // 1. Resolve macros first (they can contain XHTML inside).
-  text = resolveMacros(text);
+  // 1. Resolve macros first. Code/noformat/mermaid macros stash their
+  //    fenced-block output behind sentinel placeholders so subsequent
+  //    passes (lists, inline marks, tag stripper, entity decoder) don't
+  //    treat the source code as XHTML. Re-inserted verbatim at step 6.
+  const protectedBlocks: string[] = [];
+  text = resolveMacros(text, protectedBlocks);
 
   // 2. Block-level structural tags.
   text = resolveTables(text);
@@ -69,7 +80,28 @@ export function storageXhtmlToMarkdown(input: string): string {
   text = decodeEntities(text);
   text = collapseBlankLines(text);
 
+  // 6. Re-insert code/noformat/mermaid blocks. Done last so their content
+  //    is never re-processed by the passes above.
+  text = restoreProtectedBlocks(text, protectedBlocks);
+
   return text.trim();
+}
+
+function protectBlock(content: string, table: string[]): string {
+  const id = table.length;
+  table.push(content);
+  return `${PLACEHOLDER_PREFIX}${id}${PLACEHOLDER_SUFFIX}`;
+}
+
+function restoreProtectedBlocks(text: string, table: string[]): string {
+  if (table.length === 0) return text;
+  const re = new RegExp(
+    `${PLACEHOLDER_PREFIX.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}` +
+      "(\\d+)" +
+      `${PLACEHOLDER_SUFFIX.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}`,
+    "g"
+  );
+  return text.replace(re, (_, id) => table[Number(id)] ?? "");
 }
 
 /**
@@ -214,28 +246,91 @@ function collapseBlankLines(text: string): string {
 
 // ─── Macros ──────────────────────────────────────────────────────────────────
 
-function resolveMacros(text: string): string {
-  // Closed form: <ac:structured-macro ...>body</ac:structured-macro>
-  let out = text.replace(
-    /<ac:structured-macro\s+([^>]*?)>([\s\S]*?)<\/ac:structured-macro>/g,
-    (_full, attrsStr, body) => {
-      const name = extractAcAttr(attrsStr, "ac:name");
-      if (!name) return "";
-      return renderMacro(name, body);
+/**
+ * Walk `text` and replace each top-level `<ac:structured-macro>` (closed
+ * or self-closing) with its rendered output. Depth-aware: macros nested
+ * inside a panel/expand body do NOT terminate the outer macro early.
+ * (A non-greedy regex has the opposite behavior and corrupts nested
+ * cases like a `code` macro inside an `info` panel.)
+ */
+function resolveMacros(text: string, protectedBlocks: string[]): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const open = findNextMacroOpen(text, i);
+    if (!open) {
+      out += text.slice(i);
+      break;
     }
-  );
+    out += text.slice(i, open.start);
 
-  // Self-closing form: <ac:structured-macro ... /> (e.g. toc, page-properties-report)
-  out = out.replace(
-    /<ac:structured-macro\s+([^>]*?)\/>/g,
-    (_full, attrsStr) => {
-      const name = extractAcAttr(attrsStr, "ac:name");
-      if (!name) return "";
-      return renderMacro(name, "");
+    if (open.selfClosing) {
+      const name = extractAcAttr(open.attrs, "ac:name");
+      if (name) out += renderMacro(name, "", protectedBlocks);
+      i = open.openEnd;
+      continue;
     }
-  );
 
+    const closeIdx = findMatchingMacroClose(text, open.openEnd);
+    if (closeIdx < 0) {
+      // Unbalanced — leave the rest as-is.
+      out += text.slice(open.start);
+      break;
+    }
+    const body = text.slice(open.openEnd, closeIdx);
+    const name = extractAcAttr(open.attrs, "ac:name");
+    if (name) out += renderMacro(name, body, protectedBlocks);
+    i = closeIdx + "</ac:structured-macro>".length;
+  }
   return out;
+}
+
+interface MacroOpen {
+  start: number;
+  openEnd: number;
+  attrs: string;
+  selfClosing: boolean;
+}
+
+function findNextMacroOpen(text: string, from: number): MacroOpen | null {
+  const re = /<ac:structured-macro\s+([^>]*?)(\/?)>/g;
+  re.lastIndex = from;
+  const m = re.exec(text);
+  if (!m) return null;
+  return {
+    start: m.index,
+    openEnd: m.index + m[0].length,
+    attrs: m[1],
+    selfClosing: m[2] === "/",
+  };
+}
+
+function findMatchingMacroClose(text: string, from: number): number {
+  const open = /<ac:structured-macro\s+([^>]*?)(\/?)>/g;
+  const close = /<\/ac:structured-macro\s*>/g;
+  let depth = 1;
+  let cursor = from;
+  while (cursor < text.length) {
+    open.lastIndex = cursor;
+    close.lastIndex = cursor;
+    const o = open.exec(text);
+    const c = close.exec(text);
+    if (!c) return -1;
+    // A self-closing match doesn't open a new depth level.
+    const oIsRealOpen = o && o[2] !== "/";
+    if (oIsRealOpen && o.index < c.index) {
+      depth++;
+      cursor = o.index + o[0].length;
+    } else if (o && o[2] === "/" && o.index < c.index) {
+      // Self-closing macro between us and the next close — skip past it.
+      cursor = o.index + o[0].length;
+    } else {
+      depth--;
+      if (depth === 0) return c.index;
+      cursor = c.index + c[0].length;
+    }
+  }
+  return -1;
 }
 
 function extractAcAttr(attrs: string, key: string): string | undefined {
@@ -248,7 +343,7 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function renderMacro(name: string, body: string): string {
+function renderMacro(name: string, body: string, protectedBlocks: string[]): string {
   const lower = name.toLowerCase();
 
   switch (lower) {
@@ -256,19 +351,25 @@ function renderMacro(name: string, body: string): string {
       const lang =
         extractParam(body, "language") ?? extractParam(body, "title") ?? "";
       const text = extractPlainTextBody(body);
-      return `\n\n\`\`\`${lang}\n${text}\n\`\`\`\n\n`;
+      return protectBlock(
+        `\n\n\`\`\`${lang}\n${text}\n\`\`\`\n\n`,
+        protectedBlocks
+      );
     }
 
     case "noformat": {
       const text = extractPlainTextBody(body);
-      return `\n\n\`\`\`\n${text}\n\`\`\`\n\n`;
+      return protectBlock(`\n\n\`\`\`\n${text}\n\`\`\`\n\n`, protectedBlocks);
     }
 
     case "mermaid":
     case "mermaid-cloud":
     case "mermaid-diagram": {
       const text = extractParam(body, "code") ?? extractPlainTextBody(body);
-      return `\n\n\`\`\`mermaid\n${text}\n\`\`\`\n\n`;
+      return protectBlock(
+        `\n\n\`\`\`mermaid\n${text}\n\`\`\`\n\n`,
+        protectedBlocks
+      );
     }
 
     case "info":
@@ -279,13 +380,22 @@ function renderMacro(name: string, body: string): string {
     case "panel": {
       const inner = extractRichTextBody(body);
       const label = lower.toUpperCase();
-      return `\n\n> [!${label}]\n${prefixLines(inner, "> ")}\n\n`;
+      // The inner is already fully-resolved markdown from a recursive
+      // converter call; stash it so the outer passes don't re-process
+      // any code/inline marks/tags it contains.
+      return protectBlock(
+        `\n\n> [!${label}]\n${prefixLines(inner, "> ")}\n\n`,
+        protectedBlocks
+      );
     }
 
     case "expand": {
       const title = extractParam(body, "title") ?? "Details";
       const inner = extractRichTextBody(body);
-      return `\n\n<details><summary>${title}</summary>\n\n${inner}\n\n</details>\n\n`;
+      return protectBlock(
+        `\n\n<details><summary>${title}</summary>\n\n${inner}\n\n</details>\n\n`,
+        protectedBlocks
+      );
     }
 
     case "status": {

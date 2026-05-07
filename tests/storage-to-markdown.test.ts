@@ -226,6 +226,82 @@ describe("storageXhtmlToMarkdown — Confluence macros", () => {
     expect(trim(storageXhtmlToMarkdown(xml))).toBe("[macro: unsupported-thing]");
   });
 
+  it("preserves HTML inside a code macro (no list extraction or tag stripping)", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      '<ac:parameter ac:name="language">html</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[<ul><li>list item</li></ul>]]></ac:plain-text-body>" +
+      "</ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```html\n<ul><li>list item</li></ul>\n```");
+  });
+
+  it("preserves TypeScript generics inside a code macro", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      '<ac:parameter ac:name="language">ts</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[const xs: Array<number> = [];]]></ac:plain-text-body>" +
+      "</ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```ts\nconst xs: Array<number> = [];\n```");
+  });
+
+  it("preserves markdown-looking source inside a code macro (no inline-mark resolution)", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      '<ac:parameter ac:name="language">md</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[**not bold** and <em>not em</em>]]></ac:plain-text-body>" +
+      "</ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```md\n**not bold** and <em>not em</em>\n```");
+  });
+
+  it("preserves multiple code blocks separated by other content", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">js</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[a<b]]></ac:plain-text-body></ac:structured-macro>" +
+      "<p>between</p>" +
+      '<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">js</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[c>d]]></ac:plain-text-body></ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toContain("```js\na<b\n```");
+    expect(out).toContain("between");
+    expect(out).toContain("```js\nc>d\n```");
+  });
+
+  it("preserves a code block nested inside an info panel", () => {
+    const xml =
+      '<ac:structured-macro ac:name="info"><ac:rich-text-body>' +
+      "<p>see this:</p>" +
+      '<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">ts</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[Array<number>]]></ac:plain-text-body></ac:structured-macro>" +
+      "</ac:rich-text-body></ac:structured-macro>";
+    const out = storageXhtmlToMarkdown(xml);
+    expect(out).toContain("> [!INFO]");
+    expect(out).toContain("> see this:");
+    expect(out).toContain("Array<number>");
+    // Critical: the generic must NOT have been stripped to `Array`.
+    expect(out).not.toMatch(/Array\s*=/);
+  });
+
+  it("preserves a noformat block's content verbatim", () => {
+    const xml =
+      '<ac:structured-macro ac:name="noformat">' +
+      "<ac:plain-text-body><![CDATA[<bold> & </bold>]]></ac:plain-text-body>" +
+      "</ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```\n<bold> & </bold>\n```");
+  });
+
+  it("preserves Mermaid source even when it contains arrow syntax", () => {
+    const xml =
+      '<ac:structured-macro ac:name="mermaid-cloud">' +
+      "<ac:plain-text-body><![CDATA[sequenceDiagram\nA->>B: ping]]></ac:plain-text-body>" +
+      "</ac:structured-macro>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```mermaid\nsequenceDiagram\nA->>B: ping\n```");
+  });
+
   it("renders self-closing macros (e.g. toc) as a placeholder rather than dropping them", () => {
     expect(trim(storageXhtmlToMarkdown('<ac:structured-macro ac:name="toc"/>'))).toBe(
       "[macro: toc]"
