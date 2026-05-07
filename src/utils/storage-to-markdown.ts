@@ -122,35 +122,97 @@ function restoreProtectedBlocks(text: string, table: string[]): string {
 }
 
 /**
- * When a code macro is immediately followed by an
- * `<ac:adf-extension>` whose `extension-key` is the Mermaid diagram
- * key, rewrite the code macro to carry `language=mermaid` (so
- * `renderMacro` for "code" picks it up via `extractParam`) and drop
- * the extension. Round-tripping through markdown→storage then
- * preserves the language tag, so the Mermaid plugin keeps rendering.
+ * Find each Mermaid `<ac:adf-extension>` and look back for the
+ * closest preceding `<ac:structured-macro ac:name="code|noformat">`.
+ * If the only thing between them is whitespace, paragraph wrappers
+ * (`<p>` / `</p>`), or `<br/>`, treat them as a Mermaid pair: inject
+ * `<ac:parameter ac:name="language">mermaid</ac:parameter>` into the
+ * code macro and drop the extension.
+ *
+ * Anchored on the extension (rather than pair-matched as a single
+ * regex) because Confluence frequently wraps each node in `<p>` —
+ * the previous "macro followed by extension separated only by `\s*`"
+ * approach missed every wrapped pair.
  */
 function liftAdfExtensionLanguage(text: string): string {
-  const pattern =
-    /(<ac:structured-macro\s+[^>]*ac:name="(?:code|noformat)"[^>]*>[\s\S]*?<\/ac:structured-macro>)\s*(<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>)/g;
-  return text.replace(pattern, (_full, codeMacro, extension) => {
-    if (!isMermaidExtensionXml(extension)) return _full;
-    if (/<ac:parameter\s+ac:name="language"/i.test(codeMacro)) {
-      // Already has a language parameter — drop the extension only.
-      return codeMacro;
+  const extRe =
+    /<ac:adf-extension(?:\s[^>]*)?>([\s\S]*?)<\/ac:adf-extension>/g;
+  const macroOpenRe =
+    /<ac:structured-macro\s+[^>]*ac:name="(?:code|noformat)"[^>]*>/gi;
+  const macroCloseLiteral = "</ac:structured-macro>";
+
+  let result = "";
+  let cursor = 0;
+  let m;
+  while ((m = extRe.exec(text)) !== null) {
+    const extStart = m.index;
+    const extEnd = extStart + m[0].length;
+    const extInner = m[1];
+
+    if (!extensionInnerIsMermaid(extInner)) continue;
+
+    // Find the closest preceding `</ac:structured-macro>` and verify
+    // the gap between it and the extension is only block wrappers.
+    const beforeExt = text.slice(cursor, extStart);
+    const macroCloseIdx = beforeExt.lastIndexOf(macroCloseLiteral);
+    if (macroCloseIdx < 0) continue;
+    const macroCloseEnd = macroCloseIdx + macroCloseLiteral.length;
+    const gap = beforeExt.slice(macroCloseEnd);
+    if (!isBlockWrapperGap(gap)) continue;
+
+    // Find the matching open tag for this close. Walk backward to the
+    // last code|noformat open in `beforeExt[0..macroCloseIdx]`.
+    macroOpenRe.lastIndex = 0;
+    let lastOpenStart = -1;
+    let lastOpenEnd = -1;
+    let om;
+    while ((om = macroOpenRe.exec(beforeExt)) !== null) {
+      if (om.index >= macroCloseIdx) break;
+      lastOpenStart = om.index;
+      lastOpenEnd = om.index + om[0].length;
     }
-    const injected = codeMacro.replace(
-      /(<ac:structured-macro\s+[^>]*?>)/,
-      '$1<ac:parameter ac:name="language">mermaid</ac:parameter>'
-    );
-    return injected;
-  });
+    if (lastOpenStart < 0) continue;
+
+    const macroOpen = beforeExt.slice(lastOpenStart, lastOpenEnd);
+    const macroBody = beforeExt.slice(lastOpenEnd, macroCloseIdx);
+    const macroFull = beforeExt.slice(lastOpenStart, macroCloseEnd);
+
+    const alreadyHasLanguage =
+      /<ac:parameter\s+ac:name="language"/i.test(macroFull);
+    const newMacro = alreadyHasLanguage
+      ? macroFull
+      : macroOpen +
+        '<ac:parameter ac:name="language">mermaid</ac:parameter>' +
+        macroBody +
+        macroCloseLiteral;
+
+    // Emit: text up to the macro, the rewritten macro, the gap
+    // (possibly `<p></p>` etc., harmless), and skip past the
+    // extension.
+    result += text.slice(cursor, cursor + lastOpenStart);
+    result += newMacro;
+    result += gap;
+    cursor = extEnd;
+  }
+  result += text.slice(cursor);
+  return result;
 }
 
-function isMermaidExtensionXml(extension: string): boolean {
+/**
+ * The only content allowed between a code macro and the Mermaid
+ * extension that should still be considered a "pair": whitespace,
+ * paragraph wrappers, line breaks. Anything else (other macros,
+ * lists, tables, etc.) means they're not actually adjacent.
+ */
+function isBlockWrapperGap(gap: string): boolean {
+  return /^(?:\s|<\/?p[^>]*>|<br\s*\/?>)*$/i.test(gap);
+}
+
+function extensionInnerIsMermaid(inner: string): boolean {
   // Matches both attribute styles Confluence emits:
   //   <ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>
   //   key="extensionKey" (camelCase)
-  const m = extension.match(
+  const m = inner.match(
     /<ac:adf-attribute\s+key="extension[-_]?[Kk]ey"[^>]*>([\s\S]*?)<\/ac:adf-attribute>/
   );
   if (!m) return false;
@@ -165,8 +227,12 @@ function isMermaidExtensionXml(extension: string): boolean {
  * orchestration metadata, not content for the agent.
  */
 function stripAdfExtensions(text: string): string {
+  // Both forms: paired `<ac:adf-extension>...</ac:adf-extension>` and
+  // self-closing `<ac:adf-extension ... />`. The catch-all tag stripper
+  // would otherwise drop the wrapper but keep nested
+  // <ac:adf-attribute> text content (extension keys, local ids, etc.).
   return text.replace(
-    /<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>/g,
+    /<ac:adf-extension(?:\s[^>]*)?\/>|<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>/g,
     ""
   );
 }

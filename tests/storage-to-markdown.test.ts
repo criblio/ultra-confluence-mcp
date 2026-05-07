@@ -337,6 +337,60 @@ describe("storageXhtmlToMarkdown — Confluence macros", () => {
     expect(out).toBe("```ts\nconst x = 1;\n```");
   });
 
+  it("infers `language: mermaid` even when the macro and extension are wrapped in <p>", () => {
+    // Regression: the previous pair-match required only `\s*` between
+    // the closing `</ac:structured-macro>` and the opening
+    // `<ac:adf-extension>`, so any `<p>` wrapper Confluence emitted
+    // around either node broke the lift entirely.
+    const xml =
+      '<p><ac:structured-macro ac:name="code">' +
+      "<ac:plain-text-body><![CDATA[graph TD; A-->B]]></ac:plain-text-body>" +
+      "</ac:structured-macro></p>" +
+      '<p><ac:adf-extension><ac:adf-node type="extension">' +
+      '<ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>' +
+      "</ac:adf-node></ac:adf-extension></p>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe(
+      "```mermaid\ngraph TD; A-->B\n```"
+    );
+  });
+
+  it("infers `language: mermaid` when only the extension is wrapped in <p>", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      "<ac:plain-text-body><![CDATA[A-->B]]></ac:plain-text-body>" +
+      "</ac:structured-macro>" +
+      '<p><ac:adf-extension>' +
+      '<ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>' +
+      "</ac:adf-extension></p>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```mermaid\nA-->B\n```");
+  });
+
+  it("does NOT lift when an unrelated block separates the code macro and Mermaid extension", () => {
+    // A list (or any non-paragraph block) between them breaks the
+    // pairing — the bench/agent shouldn't see misattributed languages.
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      "<ac:plain-text-body><![CDATA[const x = 1;]]></ac:plain-text-body>" +
+      "</ac:structured-macro>" +
+      "<ul><li>not part of the pair</li></ul>" +
+      '<ac:adf-extension>' +
+      '<ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>' +
+      "</ac:adf-extension>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    // The code macro stays plain (no `mermaid` injected).
+    expect(out).toContain("```\nconst x = 1;\n```");
+    expect(out).toContain("- not part of the pair");
+    expect(out).not.toContain("```mermaid");
+  });
+
+  it("strips self-closing <ac:adf-extension/> blocks", () => {
+    const xml = "<p>before</p><ac:adf-extension key=\"x\"/><p>after</p>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("before\n\nafter");
+  });
+
   it("strips standalone <ac:adf-extension> blocks (no leaked attribute text)", () => {
     const xml =
       "<p>before</p>" +

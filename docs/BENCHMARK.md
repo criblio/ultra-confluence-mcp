@@ -19,13 +19,26 @@ context-window cost.
 npm run bench
 ```
 
-The bench targets the same "Scotts" space the integration tests use
-(id `5353898365`) and picks four representative pages plus a 25-page
-list and two CQL searches. Folder search uses the global CQL surface
-(`type=folder`) since the Scotts space has no folders. See
-[`scripts/bench.mjs`](../scripts/bench.mjs) for the full driver.
+By default the bench targets the author's "Scotts" space (id
+`5353898365`) and four hand-picked pages — the same fixtures the
+integration tests use. To run against your own tenant, point the
+bench at one of your spaces:
 
-The numbers below were captured on **2026-05-07**.
+```bash
+# Pick any 4 representative pages from a space (auto-discovered by body size):
+BENCH_DISCOVER_FROM=<spaceId> npm run bench
+
+# Or specify pages explicitly:
+BENCH_SPACE_ID=<spaceId> BENCH_PAGE_IDS=12345,67890,...,99999 npm run bench
+```
+
+The page-list scenario uses `BENCH_SPACE_ID` (defaults to Scotts).
+The CQL folder search runs globally (`type=folder`) regardless,
+since not every space has folders. See [`scripts/bench.mjs`](../scripts/bench.mjs)
+for the full driver.
+
+The numbers below were captured on **2026-05-07** against the
+author's Scotts space defaults.
 
 ---
 

@@ -540,6 +540,110 @@ describe("adfToMarkdown — Confluence specifics", () => {
     expect(md).toContain("```\nx\n```");
     expect(md).toContain("Other widget");
   });
+
+  it("lifts a Mermaid pair nested inside a panel (not just at the doc root)", () => {
+    // Regression: previously the lift only walked doc.content, so a
+    // pair inside panel/expand/tableCell silently dropped the language.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "panel",
+          attrs: { panelType: "info" },
+          content: [
+            {
+              type: "codeBlock",
+              content: [{ type: "text", text: "graph TD; A-->B" }],
+            },
+            {
+              type: "extension",
+              attrs: {
+                extensionKey:
+                  "23392b90/63d4d207/static/mermaid-diagram",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("```mermaid");
+    expect(md).toContain("> ```mermaid");
+    expect(md).toContain("> graph TD; A-->B");
+    expect(md).toContain("> ```");
+    // Critical: the language must NOT be missing (regression marker).
+    expect(md).not.toMatch(/^> ```\n/m);
+  });
+
+  it("lifts a Mermaid pair nested inside an expand block", () => {
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "expand",
+          attrs: { title: "Diagram" },
+          content: [
+            {
+              type: "codeBlock",
+              content: [{ type: "text", text: "flowchart LR; X-->Y" }],
+            },
+            {
+              type: "extension",
+              attrs: {
+                extensionKey: "ext/static/mermaid-diagram",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("<details><summary>Diagram</summary>");
+    expect(md).toContain("```mermaid\nflowchart LR; X-->Y\n```");
+  });
+
+  it("does not leak the Mermaid extension's text payload when nested in a table cell", () => {
+    // Table cells render inline content only. The lift should consume
+    // the extension regardless — leaving the cell with just the source
+    // text rather than appending a placeholder for the dropped node.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  content: [
+                    {
+                      type: "codeBlock",
+                      content: [{ type: "text", text: "A-->B" }],
+                    },
+                    {
+                      type: "extension",
+                      attrs: {
+                        extensionKey: "x/mermaid-diagram",
+                        text: "Mermaid diagram",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    // Critically: the extension's `text` attr ("Mermaid diagram") must
+    // NOT leak into the cell. Before the recursive lift, it would
+    // render as a separate `[Mermaid diagram]` placeholder.
+    expect(md).not.toContain("[Mermaid diagram]");
+    expect(md).toContain("A-->B");
+  });
 });
 
 describe("adfToMarkdown — input handling", () => {

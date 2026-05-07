@@ -142,9 +142,6 @@ describe.runIf(hasConfluenceEnv())(
     // `parentId`.
     let testRunParentId: string;
 
-    // Track page IDs for cleanup
-    const createdPageIds: number[] = [];
-
     beforeAll(async () => {
       const config = getConfig();
       client = new ConfluenceClient(config);
@@ -159,21 +156,26 @@ describe.runIf(hasConfluenceEnv())(
         }
       )) as PageResult;
       testRunParentId = parent.id;
-      createdPageIds.push(Number(testRunParentId));
     });
 
-    // afterAll(async () => {
-    //   // Clean up all pages created during tests
-    //   for (const pageId of createdPageIds) {
-    //     try {
-    //       await handlePageTool(client, "confluence_delete_page", {
-    //         pageId,
-    //       });
-    //     } catch (e) {
-    //       console.error(`Cleanup: failed to delete page ${pageId}:`, e);
-    //     }
-    //   }
-    // });
+    afterAll(async () => {
+      // Cleanup: deleting the timestamped parent page cascades to all
+      // children, so a single delete is enough regardless of how many
+      // [IT] pages each test created. Runs even when individual tests
+      // fail so the Scotts space doesn't accumulate one
+      // `Integration Tests - {ts}` parent per run.
+      if (!testRunParentId) return;
+      try {
+        await handlePageTool(client, "confluence_delete_page", {
+          pageId: Number(testRunParentId),
+        });
+      } catch (e) {
+        console.error(
+          `Cleanup: failed to delete parent ${testRunParentId}:`,
+          e
+        );
+      }
+    });
 
     // ── Storage Format Tools ───────────────────────────────────────────────
 
@@ -200,7 +202,6 @@ describe.runIf(hasConfluenceEnv())(
         expect(result.spaceId).toBe(SPACE_ID);
 
         pageId = result.id;
-        createdPageIds.push(Number(pageId));
       });
 
       it("should read back the page with storage body containing Confluence macros", { timeout: 30_000 }, async () => {
@@ -298,7 +299,6 @@ describe.runIf(hasConfluenceEnv())(
         expect(result.spaceId).toBe(SPACE_ID);
 
         pageId = result.id;
-        createdPageIds.push(Number(pageId));
       });
 
       it("should read back the page with ADF body containing mermaid codeBlock", { timeout: 30_000 }, async () => {
@@ -420,7 +420,6 @@ describe.runIf(hasConfluenceEnv())(
 
         expect(result.id).toBeDefined();
         storagePageId = result.id;
-        createdPageIds.push(Number(storagePageId));
       });
 
       it("should create a page from a large markdown file (ADF)", { timeout: 30_000 }, async () => {
@@ -437,7 +436,6 @@ describe.runIf(hasConfluenceEnv())(
 
         expect(result.id).toBeDefined();
         adfPageId = result.id;
-        createdPageIds.push(Number(adfPageId));
       });
 
       it("should read back the large storage page with expected structure", { timeout: 30_000 }, async () => {
@@ -719,7 +717,6 @@ graph LR
         expect(result.id).toBeDefined();
         expect(result.title).toBe(`[IT] FilePath Create Storage - ${TIMESTAMP}`);
         expect(result.status).toBe("current");
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify content matches what's in the file
         const page = (await handlePageTool(
@@ -747,7 +744,6 @@ graph LR
 
         expect(result.id).toBeDefined();
         expect(result.title).toBe(`[IT] FilePath Create ADF - ${TIMESTAMP}`);
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify ADF structure
         const page = (await handlePageTool(
@@ -776,7 +772,6 @@ graph LR
         )) as PageResult;
 
         expect(createResult.id).toBeDefined();
-        createdPageIds.push(Number(createResult.id));
 
         // Update with long file
         const updateResult = (await handlePageTool(
@@ -819,7 +814,6 @@ graph LR
         )) as PageResult;
 
         expect(createResult.id).toBeDefined();
-        createdPageIds.push(Number(createResult.id));
 
         // Update with long file
         const updateResult = (await handlePageTool(
@@ -862,7 +856,6 @@ graph LR
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         const page = (await handlePageTool(
           client,
@@ -903,7 +896,6 @@ graph LR
           }
         )) as PageResult;
         expect(shortPage.id).toBeDefined();
-        createdPageIds.push(Number(shortPage.id));
 
         const longPage = (await handlePageTool(
           client,
@@ -916,7 +908,6 @@ graph LR
           }
         )) as PageResult;
         expect(longPage.id).toBeDefined();
-        createdPageIds.push(Number(longPage.id));
 
         // Now create the page that contains .md links to them
         const result = (await handlePageTool(
@@ -931,7 +922,6 @@ graph LR
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify links are present in storage format
         const page = (await handlePageTool(
@@ -991,7 +981,6 @@ graph LR
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify links are present in ADF format
         const page = (await handlePageTool(

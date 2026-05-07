@@ -43,11 +43,12 @@ export function adfToMarkdown(input: AdfDocument | string): string {
  * `confluence_update_page_from_markdown` would emit a plain code
  * block, breaking the Mermaid plugin's render.
  *
- * Fix: walk the top-level content once and, when a codeBlock is
- * followed by a Mermaid extension, retroactively tag the codeBlock
- * `language: "mermaid"` and drop the extension. The extension
- * carries no agent-useful information beyond "this preceding block
- * was Mermaid".
+ * Fix: walk the content recursively (Mermaid pairs can appear nested
+ * inside `panel`, `expand`, table cells, etc., not just at the doc
+ * root). When a codeBlock is followed by a Mermaid extension,
+ * retroactively tag the codeBlock `language: "mermaid"` and drop the
+ * extension. The extension carries no agent-useful information
+ * beyond "this preceding block was Mermaid".
  */
 function liftMermaidLanguage(content: AdfNode[]): AdfNode[] {
   const out: AdfNode[] = [];
@@ -66,7 +67,14 @@ function liftMermaidLanguage(content: AdfNode[]): AdfNode[] {
       i++; // consume the extension node
       continue;
     }
-    out.push(node);
+    // Recurse into any nested content arrays so the lift fires
+    // anywhere a Mermaid pair appears (panel.content, expand.content,
+    // tableCell.content, blockquote.content, etc.).
+    if (Array.isArray(node.content) && node.content.length > 0) {
+      out.push({ ...node, content: liftMermaidLanguage(node.content) });
+    } else {
+      out.push(node);
+    }
   }
   return out;
 }

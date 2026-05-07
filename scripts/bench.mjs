@@ -31,24 +31,24 @@ loadEnv({ path: ".env" });
 loadEnv({ path: ".env.local", override: true });
 
 import { ConfluenceClient } from "../build/auth/confluence-client.js";
-import { getConfig, getToolFilterConfig } from "../build/config.js";
+import { getConfig } from "../build/config.js";
 import { applyTrim } from "../build/core/trim.js";
 import { getFilteredTools } from "../build/tools/index.js";
 
-const SPACE_ID = "5353898365";
+// Default targets are pages in the author's "Scotts" space (the same
+// space the integration tests use). Override via env when running
+// against a different tenant — see docs/BENCHMARK.md.
+//
+//   BENCH_SPACE_ID         space id for the page-list scenario
+//   BENCH_PAGE_IDS         comma-separated page ids (4 representative
+//                          sizes; bench discovers labels from the API)
+//   BENCH_DISCOVER_FROM    space id; if set and BENCH_PAGE_IDS is not,
+//                          pick 4 pages of varying body size from that
+//                          space automatically
+const DEFAULT_SPACE_ID = "5353898365"; // Scotts
+const DEFAULT_PAGE_IDS = [5356749914, 5426874944, 5425597351, 5358485527];
 
-// Target pages in the Scotts space. The body sizes (storage / ADF)
-// printed in the discovery probe earlier:
-//   5356749914  Mermaid API Test         ~1KB / ~1KB
-//   5426874944  Short Doc Storage        ~3KB / ~9KB
-//   5425597351  Long Doc Storage         ~12KB / ~37KB
-//   5358485527  Confluence MCP - README  ~39KB / ~47KB
-const PAGE_TARGETS = [
-  { label: "tiny page (~1KB body)", id: 5356749914 },
-  { label: "short page (~3KB body)", id: 5426874944 },
-  { label: "long page (~12KB body)", id: 5425597351 },
-  { label: "huge page (~39KB body)", id: 5358485527 },
-];
+const SPACE_ID = process.env.BENCH_SPACE_ID ?? DEFAULT_SPACE_ID;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("en-US");
 function fmt(n) {
@@ -76,36 +76,24 @@ function header(title) {
   console.log("");
 }
 
-function pad(s, n) {
-  s = String(s);
-  return s.length >= n ? s : s + " ".repeat(n - s.length);
-}
-
 // ─── Tool-list cost ─────────────────────────────────────────────────────────
 
-function measureToolList(label, env) {
-  const saved = {};
-  for (const k of Object.keys(env)) {
-    saved[k] = process.env[k];
-    if (env[k] === undefined) delete process.env[k];
-    else process.env[k] = env[k];
-  }
-  try {
-    const filterConfig = getToolFilterConfig();
-    const tools = getFilteredTools(filterConfig);
-    const wire = JSON.stringify({ tools });
-    return {
-      label,
-      tools: tools.length,
-      bytes: bytes(wire),
-      tokens: toks(bytes(wire)),
-    };
-  } finally {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
+/**
+ * Measure the wire size of `{ tools: [...] }` for a given filter.
+ * Passes the filter config explicitly to `getFilteredTools` rather
+ * than mutating `process.env` — keeps the bench independent of any
+ * caching the filter machinery might do at first call.
+ */
+function measureToolList(label, filterConfig) {
+  const tools = getFilteredTools(filterConfig);
+  const wire = JSON.stringify({ tools });
+  const wireBytes = bytes(wire);
+  return {
+    label,
+    tools: tools.length,
+    bytes: wireBytes,
+    tokens: toks(wireBytes),
+  };
 }
 
 // ─── Per-call cost (single page) ────────────────────────────────────────────
@@ -123,6 +111,83 @@ async function measureSinglePage(client, target, format) {
     trim: trimBytes,
     ratio: ratio(rawBytes, trimBytes),
   };
+}
+
+/**
+ * Resolve the page targets to use for the single-page-read scenarios.
+ *
+ * Priority:
+ *   1. `BENCH_PAGE_IDS=12,34,56,78` — explicit list (any count, but 4
+ *      is what the report tables expect).
+ *   2. `BENCH_DISCOVER_FROM=<spaceId>` — pick representative pages
+ *      from that space by body size.
+ *   3. Author defaults from the Scotts space.
+ *
+ * In all cases each target's body size is probed via the API so the
+ * label reflects the real content rather than a baked-in description.
+ */
+async function resolvePageTargets(client) {
+  const explicit = process.env.BENCH_PAGE_IDS;
+  if (explicit) {
+    const ids = explicit
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n));
+    return labelTargets(client, ids);
+  }
+
+  const discoverFrom = process.env.BENCH_DISCOVER_FROM;
+  if (discoverFrom) {
+    const ids = await discoverPageIds(client, discoverFrom);
+    return labelTargets(client, ids);
+  }
+
+  return labelTargets(client, DEFAULT_PAGE_IDS);
+}
+
+async function labelTargets(client, ids) {
+  const out = [];
+  for (const id of ids) {
+    try {
+      const page = await client.get(`/pages/${id}`, {
+        "body-format": "atlas_doc_format",
+      });
+      const body = page.body?.atlas_doc_format?.value ?? "";
+      const sizeKB = Math.max(1, Math.round(body.length / 1024));
+      out.push({
+        label: `page ~${sizeKB}KB body ("${(page.title || "").slice(0, 40)}")`,
+        id,
+      });
+    } catch (err) {
+      console.error(`bench: skipping page ${id}: ${err.message}`);
+    }
+  }
+  return out;
+}
+
+async function discoverPageIds(client, spaceId, want = 4) {
+  const list = await client.get(`/spaces/${spaceId}/pages`, {
+    "body-format": "atlas_doc_format",
+    limit: 100,
+  });
+  const ranked = (list.results ?? [])
+    .map((p) => ({
+      id: Number(p.id),
+      size: (p.body?.atlas_doc_format?.value ?? "").length,
+    }))
+    .filter((p) => Number.isFinite(p.id) && p.size > 0)
+    .sort((a, b) => a.size - b.size);
+
+  if (ranked.length <= want) return ranked.map((p) => p.id);
+
+  // Pick `want` pages spanning the size distribution: smallest,
+  // largest, and evenly-spaced points in between.
+  const picks = [];
+  for (let i = 0; i < want; i++) {
+    const idx = Math.round((i * (ranked.length - 1)) / (want - 1));
+    picks.push(ranked[idx].id);
+  }
+  return Array.from(new Set(picks));
 }
 
 // ─── Per-call cost (page list) ──────────────────────────────────────────────
@@ -171,17 +236,20 @@ async function main() {
   header("Tool-list footprint (per-conversation overhead)");
   const toolListRows = [
     measureToolList("default (all categories)", {
-      CONFLUENCE_ENABLED_CATEGORIES: undefined,
-      CONFLUENCE_DISABLED_TOOLS: undefined,
+      enabledCategories: [],
+      disabledTools: [],
     }),
     measureToolList("3 categories (page, search, body)", {
-      CONFLUENCE_ENABLED_CATEGORIES: "page,search,body",
-      CONFLUENCE_DISABLED_TOOLS: undefined,
+      enabledCategories: ["page", "search", "body"],
+      disabledTools: [],
     }),
     measureToolList("3 categories minus destructive ops", {
-      CONFLUENCE_ENABLED_CATEGORIES: "page,search,body",
-      CONFLUENCE_DISABLED_TOOLS:
-        "confluence_delete_page,confluence_create_page,confluence_update_page",
+      enabledCategories: ["page", "search", "body"],
+      disabledTools: [
+        "confluence_delete_page",
+        "confluence_create_page",
+        "confluence_update_page",
+      ],
     }),
   ];
   const baseToolBytes = toolListRows[0].bytes;
@@ -201,8 +269,9 @@ async function main() {
   const client = new ConfluenceClient(getConfig());
 
   header("Per-call cost — single page reads");
+  const pageTargets = await resolvePageTargets(client);
   const singlePageRows = [];
-  for (const target of PAGE_TARGETS) {
+  for (const target of pageTargets) {
     for (const format of ["storage", "atlas_doc_format"]) {
       singlePageRows.push(await measureSinglePage(client, target, format));
     }
