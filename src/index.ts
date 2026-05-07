@@ -9,7 +9,13 @@ import {
   ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { getConfig, getToolFilterConfig, ToolFilterConfig } from "./config.js";
+import {
+  getConfig,
+  getToolFilterConfig,
+  getTrimConfig,
+  ToolFilterConfig,
+  TrimConfig,
+} from "./config.js";
 import { ConfluenceClient, ConfluenceApiError } from "./auth/confluence-client.js";
 import { getFilteredTools, handleTool } from "./tools/index.js";
 import {
@@ -43,9 +49,14 @@ function getClient(): ConfluenceClient {
   return confluenceClient;
 }
 
-// Cache tool filter config at startup
+// Cache tool filter and trim config at startup
 const toolFilterConfig: ToolFilterConfig = getToolFilterConfig();
+const trimConfig: TrimConfig = getTrimConfig();
 const filteredTools = getFilteredTools(toolFilterConfig);
+
+if (trimConfig.disabled) {
+  console.error("Response trimming disabled (CONFLUENCE_DISABLE_TRIM)");
+}
 
 // Log filtering info if any filtering is active
 if (toolFilterConfig.enabledCategories.length > 0) {
@@ -74,7 +85,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     const client = getClient();
-    const result = await handleTool(client, name, args || {}, toolFilterConfig);
+    const result = await handleTool(
+      client,
+      name,
+      args || {},
+      toolFilterConfig,
+      trimConfig
+    );
 
     return {
       content: [

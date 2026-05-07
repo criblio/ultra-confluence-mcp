@@ -43,6 +43,11 @@ export interface ToolFilterConfig {
   disabledTools: string[]; // Specific tools to disable
 }
 
+export interface TrimConfig {
+  /** When true, disables response trimming server-wide. */
+  disabled: boolean;
+}
+
 /**
  * Detect token type based on prefix
  * - ATATT: Scoped API token (user)
@@ -138,4 +143,19 @@ export function getToolFilterConfig(): ToolFilterConfig {
     enabledCategories,
     disabledTools,
   };
+}
+
+/**
+ * CONFLUENCE_DISABLE_TRIM=1: bypass response trimming for all tools.
+ * Useful for debugging or when downstream consumers depend on the raw
+ * Confluence API shape.
+ */
+export function getTrimConfig(): TrimConfig {
+  const raw = process.env.CONFLUENCE_DISABLE_TRIM;
+  const disabled =
+    raw !== undefined &&
+    raw !== "" &&
+    raw !== "0" &&
+    raw.toLowerCase() !== "false";
+  return { disabled };
 }

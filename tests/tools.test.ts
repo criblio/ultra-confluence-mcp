@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getFilteredTools, isToolEnabled, allTools } from "../src/tools/index.js";
 import { ToolFilterConfig } from "../src/config.js";
+import { getTrimKind } from "../src/core/trim-registry.js";
 
 describe("tools", () => {
   describe("allTools", () => {
@@ -46,6 +47,27 @@ describe("tools", () => {
       for (const tool of allTools) {
         expect(tool.inputSchema).toBeTruthy();
         expect(typeof tool.inputSchema).toBe("object");
+      }
+    });
+
+    it("exposes a `full` arg on every trimmed tool's inputSchema", () => {
+      for (const tool of allTools) {
+        const kind = getTrimKind(tool.name);
+        if (kind === "passthrough") continue;
+        const schema = tool.inputSchema as {
+          properties?: Record<string, unknown>;
+        };
+        expect(
+          schema.properties?.full,
+          `expected ${tool.name} to expose a 'full' arg`
+        ).toBeDefined();
+      }
+    });
+
+    it("does not require `full` on any tool", () => {
+      for (const tool of allTools) {
+        const schema = tool.inputSchema as { required?: string[] };
+        expect(schema.required ?? []).not.toContain("full");
       }
     });
   });

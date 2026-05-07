@@ -1,9 +1,13 @@
 import { ConfluenceClient } from "../auth/confluence-client.js";
 import {
   getToolFilterConfig,
+  getTrimConfig,
   ToolCategory,
   ToolFilterConfig,
+  TrimConfig,
 } from "../config.js";
+import { applyTrim } from "../core/trim.js";
+import { getTrimKind } from "../core/trim-registry.js";
 
 // Import all tool definitions and handlers
 import { pageTools, handlePageTool } from "./pages.js";
@@ -27,21 +31,65 @@ interface Tool {
   inputSchema: unknown;
 }
 
-// Map category names to their tools
+interface ObjectSchema {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [k: string]: unknown;
+}
+
+const FULL_ARG_DESCRIPTION =
+  "If true, bypass response trimming and return the raw Confluence API response.";
+
+/**
+ * Inject the `full` escape-hatch arg into the inputSchema of every tool
+ * whose response is trimmed. Done centrally so per-file tool definitions
+ * don't have to repeat the boilerplate, and new tools pick it up the
+ * moment they're added to TOOL_TRIM_MAP.
+ */
+function injectFullArg(tool: Tool): Tool {
+  if (getTrimKind(tool.name) === "passthrough") return tool;
+
+  const schema = tool.inputSchema;
+  if (
+    typeof schema !== "object" ||
+    schema === null ||
+    (schema as ObjectSchema).type !== "object"
+  ) {
+    return tool;
+  }
+
+  const objSchema = schema as ObjectSchema;
+  const properties = objSchema.properties ?? {};
+  if ("full" in properties) return tool;
+
+  return {
+    ...tool,
+    inputSchema: {
+      ...objSchema,
+      properties: {
+        ...properties,
+        full: { type: "boolean", description: FULL_ARG_DESCRIPTION },
+      },
+    },
+  };
+}
+
+// Map category names to their tools (with `full` arg injected on read tools)
 const toolsByCategory: Record<ToolCategory, Tool[]> = {
-  page: pageTools,
-  space: spaceTools,
-  blogPost: blogPostTools,
-  comment: commentTools,
-  attachment: attachmentTools,
-  label: labelTools,
-  search: searchTools,
-  user: userTools,
-  version: versionTools,
-  contentProperty: contentPropertyTools,
-  ancestor: ancestorTools,
-  descendant: descendantTools,
-  server: serverTools,
+  page: pageTools.map(injectFullArg),
+  space: spaceTools.map(injectFullArg),
+  blogPost: blogPostTools.map(injectFullArg),
+  comment: commentTools.map(injectFullArg),
+  attachment: attachmentTools.map(injectFullArg),
+  label: labelTools.map(injectFullArg),
+  search: searchTools.map(injectFullArg),
+  user: userTools.map(injectFullArg),
+  version: versionTools.map(injectFullArg),
+  contentProperty: contentPropertyTools.map(injectFullArg),
+  ancestor: ancestorTools.map(injectFullArg),
+  descendant: descendantTools.map(injectFullArg),
+  server: serverTools.map(injectFullArg),
 };
 
 // Export all tools as a single array (unfiltered)
@@ -112,12 +160,33 @@ export function isToolEnabled(
   return true;
 }
 
+/**
+ * Strip the `full` escape-hatch arg before handing args to category
+ * handlers — it's a trim-layer concern, not a Confluence-API param.
+ */
+function extractFullFlag(args: unknown): { full: boolean; rest: unknown } {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return { full: false, rest: args };
+  }
+  const obj = args as Record<string, unknown>;
+  const full = obj.full === true;
+  if (!("full" in obj)) {
+    return { full: false, rest: args };
+  }
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k !== "full") rest[k] = v;
+  }
+  return { full, rest };
+}
+
 // Main tool handler that routes to the appropriate category handler
 export async function handleTool(
   client: ConfluenceClient,
   toolName: string,
   args: unknown,
-  filterConfig?: ToolFilterConfig
+  filterConfig?: ToolFilterConfig,
+  trimConfig?: TrimConfig
 ): Promise<unknown> {
   const category = toolCategories[toolName];
 
@@ -130,34 +199,53 @@ export async function handleTool(
     throw new Error(`Tool "${toolName}" is disabled`);
   }
 
+  const { full, rest } = extractFullFlag(args);
+
+  let raw: unknown;
   switch (category) {
     case "page":
-      return handlePageTool(client, toolName, args);
+      raw = await handlePageTool(client, toolName, rest);
+      break;
     case "space":
-      return handleSpaceTool(client, toolName, args);
+      raw = await handleSpaceTool(client, toolName, rest);
+      break;
     case "blogPost":
-      return handleBlogPostTool(client, toolName, args);
+      raw = await handleBlogPostTool(client, toolName, rest);
+      break;
     case "comment":
-      return handleCommentTool(client, toolName, args);
+      raw = await handleCommentTool(client, toolName, rest);
+      break;
     case "attachment":
-      return handleAttachmentTool(client, toolName, args);
+      raw = await handleAttachmentTool(client, toolName, rest);
+      break;
     case "label":
-      return handleLabelTool(client, toolName, args);
+      raw = await handleLabelTool(client, toolName, rest);
+      break;
     case "search":
-      return handleSearchTool(client, toolName, args);
+      raw = await handleSearchTool(client, toolName, rest);
+      break;
     case "user":
-      return handleUserTool(client, toolName, args);
+      raw = await handleUserTool(client, toolName, rest);
+      break;
     case "version":
-      return handleVersionTool(client, toolName, args);
+      raw = await handleVersionTool(client, toolName, rest);
+      break;
     case "contentProperty":
-      return handleContentPropertyTool(client, toolName, args);
+      raw = await handleContentPropertyTool(client, toolName, rest);
+      break;
     case "ancestor":
-      return handleAncestorTool(client, toolName, args);
+      raw = await handleAncestorTool(client, toolName, rest);
+      break;
     case "descendant":
-      return handleDescendantTool(client, toolName, args);
+      raw = await handleDescendantTool(client, toolName, rest);
+      break;
     case "server":
-      return handleServerTool(client, toolName, args);
+      raw = await handleServerTool(client, toolName, rest);
+      break;
     default:
       throw new Error(`Unknown tool category: ${category}`);
   }
+
+  const trim = trimConfig ?? getTrimConfig();
+  return applyTrim(toolName, raw, { full, disabled: trim.disabled });
 }

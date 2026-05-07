@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "id": "att-7001",
+      "status": "current",
+      "title": "diagram.png",
+      "pageId": "1234567890",
+      "mediaType": "image/png",
+      "mediaTypeDescription": "Portable Network Graphics",
+      "comment": "Architecture diagram",
+      "fileId": "file-abc123",
+      "fileSize": 248192,
+      "webuiLink": "/wiki/download/attachments/1234567890/diagram.png",
+      "downloadLink": "/wiki/download/attachments/1234567890/diagram.png?version=1",
+      "version": {
+        "createdAt": "2024-12-01T10:00:00.000Z",
+        "number": 1,
+        "minorEdit": false,
+        "authorId": "5b10ac8d82e05b22cc7d4ef5"
+      },
+      "_links": {
+        "webui": "/spaces/ENG/pages/1234567890/attachments/att-7001",
+        "self": "https://example.atlassian.net/wiki/api/v2/attachments/att-7001",
+        "base": "https://example.atlassian.net/wiki",
+        "download": "/download/attachments/1234567890/diagram.png"
+      }
+    }
+  ],
+  "_links": {
+    "next": null,
+    "base": "https://example.atlassian.net/wiki"
+  }
+}

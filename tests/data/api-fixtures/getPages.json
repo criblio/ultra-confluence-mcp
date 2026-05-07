@@ -1,0 +1,71 @@
+{
+  "results": [
+    {
+      "id": "1001",
+      "status": "current",
+      "title": "Onboarding",
+      "spaceId": "98765",
+      "parentId": null,
+      "parentType": null,
+      "position": 1,
+      "authorId": "5b10ac8d82e05b22cc7d4ef5",
+      "createdAt": "2024-09-01T10:00:00.000Z",
+      "version": {
+        "createdAt": "2024-12-15T10:00:00.000Z",
+        "number": 3,
+        "minorEdit": false,
+        "authorId": "5b10ac8d82e05b22cc7d4ef5"
+      },
+      "body": {
+        "storage": {
+          "value": "<p>Body content that should be dropped from list responses</p>",
+          "representation": "storage"
+        }
+      },
+      "_links": {
+        "webui": "/spaces/ENG/pages/1001/Onboarding",
+        "editui": "/pages/resumedraft.action?draftId=1001",
+        "tinyui": "/x/Aaaa",
+        "self": "https://example.atlassian.net/wiki/api/v2/pages/1001",
+        "base": "https://example.atlassian.net/wiki"
+      },
+      "_expandable": {
+        "container": "/rest/api/space/ENG"
+      }
+    },
+    {
+      "id": "1002",
+      "status": "current",
+      "title": "Architecture Overview",
+      "spaceId": "98765",
+      "parentId": "1001",
+      "parentType": "page",
+      "position": 2,
+      "authorId": "5b10ac8d82e05b22cc7d4ef5",
+      "createdAt": "2024-09-02T10:00:00.000Z",
+      "version": {
+        "createdAt": "2024-12-20T10:00:00.000Z",
+        "number": 5,
+        "minorEdit": true,
+        "authorId": "5b10ac8d82e05b22cc7d4ef5"
+      },
+      "body": {
+        "storage": {
+          "value": "<p>More body content that should be dropped</p>",
+          "representation": "storage"
+        }
+      },
+      "_links": {
+        "webui": "/spaces/ENG/pages/1002/Architecture+Overview",
+        "editui": "/pages/resumedraft.action?draftId=1002",
+        "tinyui": "/x/Bbbb",
+        "self": "https://example.atlassian.net/wiki/api/v2/pages/1002",
+        "base": "https://example.atlassian.net/wiki"
+      }
+    }
+  ],
+  "_links": {
+    "next": "/wiki/api/v2/pages?cursor=eyJpZCI6MTAwMn0%3D&limit=25",
+    "base": "https://example.atlassian.net/wiki"
+  }
+}
