@@ -455,6 +455,91 @@ describe("adfToMarkdown — Confluence specifics", () => {
     });
     expect(md.trim()).toBe("```mermaid\ngraph TD; A-->B\n```");
   });
+
+  it("infers `language: mermaid` on a preceding language-less codeBlock when paired with the Mermaid extension", () => {
+    // This is what Confluence's ADF actually emits for a Mermaid
+    // diagram: the codeBlock carries the source with NO language attr,
+    // and a sibling extension node tells the Mermaid plugin to render.
+    // Without the lift, the agent would receive a plain ` ``` ` block
+    // and lose the language tag on round-trip.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          // no attrs.language — this is the bug condition
+          content: [
+            { type: "text", text: "sequenceDiagram\nA->>B: ping" },
+          ],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey:
+              "23392b90-4271-4239-98ca-a3e96c663cbb/63d4d207-ac2f-4273-865c-0240d37f044a/static/mermaid-diagram",
+            parameters: { localId: "test-mermaid-1" },
+            text: "Mermaid diagram",
+          },
+        },
+      ],
+    });
+    expect(md.trim()).toBe(
+      "```mermaid\nsequenceDiagram\nA->>B: ping\n```"
+    );
+  });
+
+  it("does NOT lift to mermaid when the codeBlock already has a language", () => {
+    // If the agent put an explicit language on the codeBlock, respect
+    // it — don't override with mermaid just because an unrelated
+    // extension happens to follow.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          attrs: { language: "ts" },
+          content: [{ type: "text", text: "const x = 1;" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey:
+              "23392b90/63d4d207/static/mermaid-diagram",
+          },
+        },
+      ],
+    });
+    expect(md.trim()).toBe("```ts\nconst x = 1;\n```");
+  });
+
+  it("does NOT lift when the following extension is not a Mermaid one", () => {
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "x" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey: "some-other-extension/v1/widget",
+            text: "Other widget",
+          },
+        },
+      ],
+    });
+    // codeBlock renders plain (no language inferred), and the extension
+    // renders its placeholder.
+    expect(md).toContain("```\nx\n```");
+    expect(md).toContain("Other widget");
+  });
 });
 
 describe("adfToMarkdown — input handling", () => {

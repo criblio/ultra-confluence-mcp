@@ -302,6 +302,59 @@ describe("storageXhtmlToMarkdown — Confluence macros", () => {
     expect(out).toBe("```mermaid\nsequenceDiagram\nA->>B: ping\n```");
   });
 
+  it("infers `language: mermaid` on a `code` macro when followed by an <ac:adf-extension> with the Mermaid extension key", () => {
+    // This is the actual storage shape Confluence emits when an agent
+    // creates a Mermaid diagram via the editor: a `code` macro with no
+    // language parameter, followed by an `ac:adf-extension` whose
+    // `extension-key` ends in `/static/mermaid-diagram`. Without the
+    // lift, the code macro renders as a plain block and round-tripping
+    // breaks the Mermaid plugin's render.
+    const xml =
+      '<ac:structured-macro ac:name="code" ac:schema-version="1">' +
+      "<ac:plain-text-body><![CDATA[sequenceDiagram\nA->>B: ping]]></ac:plain-text-body>" +
+      "</ac:structured-macro>" +
+      '<ac:adf-extension><ac:adf-node type="extension">' +
+      '<ac:adf-attribute key="extension-key">23392b90-4271-4239-98ca-a3e96c663cbb/63d4d207-ac2f-4273-865c-0240d37f044a/static/mermaid-diagram</ac:adf-attribute>' +
+      '<ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute>' +
+      '<ac:adf-attribute key="text">Mermaid diagram</ac:adf-attribute>' +
+      "</ac:adf-node></ac:adf-extension>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe(
+      "```mermaid\nsequenceDiagram\nA->>B: ping\n```"
+    );
+  });
+
+  it("does NOT clobber an explicit language on the code macro just because a Mermaid extension follows", () => {
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      '<ac:parameter ac:name="language">ts</ac:parameter>' +
+      "<ac:plain-text-body><![CDATA[const x = 1;]]></ac:plain-text-body>" +
+      "</ac:structured-macro>" +
+      '<ac:adf-extension><ac:adf-node type="extension">' +
+      '<ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>' +
+      "</ac:adf-node></ac:adf-extension>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("```ts\nconst x = 1;\n```");
+  });
+
+  it("strips standalone <ac:adf-extension> blocks (no leaked attribute text)", () => {
+    const xml =
+      "<p>before</p>" +
+      '<ac:adf-extension><ac:adf-node type="extension">' +
+      '<ac:adf-attribute key="extension-key">some-key/v1/widget</ac:adf-attribute>' +
+      '<ac:adf-attribute key="text">A widget</ac:adf-attribute>' +
+      '<ac:adf-attribute key="local-id">abc-123</ac:adf-attribute>' +
+      "</ac:adf-node></ac:adf-extension>" +
+      "<p>after</p>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    expect(out).toBe("before\n\nafter");
+    // Critically, none of the extension metadata should leak into the
+    // output — these are all internal plugin orchestration values.
+    expect(out).not.toContain("some-key");
+    expect(out).not.toContain("A widget");
+    expect(out).not.toContain("abc-123");
+  });
+
   it("renders self-closing macros (e.g. toc) as a placeholder rather than dropping them", () => {
     expect(trim(storageXhtmlToMarkdown('<ac:structured-macro ac:name="toc"/>'))).toBe(
       "[macro: toc]"

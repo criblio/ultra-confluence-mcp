@@ -51,6 +51,23 @@ export function storageXhtmlToMarkdown(input: string): string {
   //    on a literal '>' that's actually part of an attribute value.
   let text = encodeAngleBracketsInAttrs(input);
 
+  // 0b. Confluence stores Mermaid diagrams as a code macro followed by
+  //    a sibling <ac:adf-extension> with extensionKey ending in
+  //    `mermaid-diagram`. The code macro itself has no language
+  //    parameter — the extension is what tells the Mermaid plugin to
+  //    render. Rewrite the pair so the code macro carries
+  //    language=mermaid, then drop the extension. Order matters:
+  //    must run before resolveMacros so the macro renderer sees the
+  //    injected language parameter.
+  text = liftAdfExtensionLanguage(text);
+
+  // 0c. Strip any remaining <ac:adf-extension> blocks. They're
+  //    plugin-orchestration metadata with no agent-useful payload, but
+  //    the catch-all tag stripper would otherwise leave their nested
+  //    <ac:adf-attribute> text content intact (extension keys, local
+  //    ids, etc. leaking into the markdown output).
+  text = stripAdfExtensions(text);
+
   // 1. Resolve macros first. Code/noformat/mermaid macros stash their
   //    fenced-block output behind sentinel placeholders so subsequent
   //    passes (lists, inline marks, tag stripper, entity decoder) don't
@@ -102,6 +119,56 @@ function restoreProtectedBlocks(text: string, table: string[]): string {
     "g"
   );
   return text.replace(re, (_, id) => table[Number(id)] ?? "");
+}
+
+/**
+ * When a code macro is immediately followed by an
+ * `<ac:adf-extension>` whose `extension-key` is the Mermaid diagram
+ * key, rewrite the code macro to carry `language=mermaid` (so
+ * `renderMacro` for "code" picks it up via `extractParam`) and drop
+ * the extension. Round-tripping through markdown→storage then
+ * preserves the language tag, so the Mermaid plugin keeps rendering.
+ */
+function liftAdfExtensionLanguage(text: string): string {
+  const pattern =
+    /(<ac:structured-macro\s+[^>]*ac:name="(?:code|noformat)"[^>]*>[\s\S]*?<\/ac:structured-macro>)\s*(<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>)/g;
+  return text.replace(pattern, (_full, codeMacro, extension) => {
+    if (!isMermaidExtensionXml(extension)) return _full;
+    if (/<ac:parameter\s+ac:name="language"/i.test(codeMacro)) {
+      // Already has a language parameter — drop the extension only.
+      return codeMacro;
+    }
+    const injected = codeMacro.replace(
+      /(<ac:structured-macro\s+[^>]*?>)/,
+      '$1<ac:parameter ac:name="language">mermaid</ac:parameter>'
+    );
+    return injected;
+  });
+}
+
+function isMermaidExtensionXml(extension: string): boolean {
+  // Matches both attribute styles Confluence emits:
+  //   <ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>
+  //   key="extensionKey" (camelCase)
+  const m = extension.match(
+    /<ac:adf-attribute\s+key="extension[-_]?[Kk]ey"[^>]*>([\s\S]*?)<\/ac:adf-attribute>/
+  );
+  if (!m) return false;
+  return m[1].includes("mermaid-diagram");
+}
+
+/**
+ * Drop any remaining `<ac:adf-extension>` blocks. After the Mermaid
+ * lift in `liftAdfExtensionLanguage` the only ones left are
+ * standalone extensions (no preceding code macro to attach to) or
+ * non-Mermaid extension types. Either way, their payload is plugin
+ * orchestration metadata, not content for the agent.
+ */
+function stripAdfExtensions(text: string): string {
+  return text.replace(
+    /<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>/g,
+    ""
+  );
 }
 
 /**
