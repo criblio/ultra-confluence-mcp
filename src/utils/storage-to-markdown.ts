@@ -51,6 +51,23 @@ export function storageXhtmlToMarkdown(input: string): string {
   //    on a literal '>' that's actually part of an attribute value.
   let text = encodeAngleBracketsInAttrs(input);
 
+  // 0b. Confluence stores Mermaid diagrams as a code macro followed by
+  //    a sibling <ac:adf-extension> with extensionKey ending in
+  //    `mermaid-diagram`. The code macro itself has no language
+  //    parameter — the extension is what tells the Mermaid plugin to
+  //    render. Rewrite the pair so the code macro carries
+  //    language=mermaid, then drop the extension. Order matters:
+  //    must run before resolveMacros so the macro renderer sees the
+  //    injected language parameter.
+  text = liftAdfExtensionLanguage(text);
+
+  // 0c. Strip any remaining <ac:adf-extension> blocks. They're
+  //    plugin-orchestration metadata with no agent-useful payload, but
+  //    the catch-all tag stripper would otherwise leave their nested
+  //    <ac:adf-attribute> text content intact (extension keys, local
+  //    ids, etc. leaking into the markdown output).
+  text = stripAdfExtensions(text);
+
   // 1. Resolve macros first. Code/noformat/mermaid macros stash their
   //    fenced-block output behind sentinel placeholders so subsequent
   //    passes (lists, inline marks, tag stripper, entity decoder) don't
@@ -102,6 +119,141 @@ function restoreProtectedBlocks(text: string, table: string[]): string {
     "g"
   );
   return text.replace(re, (_, id) => table[Number(id)] ?? "");
+}
+
+/**
+ * Find each Mermaid `<ac:adf-extension>` and look back for the
+ * closest preceding `<ac:structured-macro ac:name="code|noformat">`.
+ * If the only thing between them is whitespace, paragraph wrappers
+ * (`<p>` / `</p>`), or `<br/>`, treat them as a Mermaid pair: inject
+ * `<ac:parameter ac:name="language">mermaid</ac:parameter>` into the
+ * code macro and drop the extension.
+ *
+ * Anchored on the extension (rather than pair-matched as a single
+ * regex) because Confluence frequently wraps each node in `<p>` —
+ * the previous "macro followed by extension separated only by `\s*`"
+ * approach missed every wrapped pair.
+ *
+ * Non-paired extensions (no preceding code macro, gap contains other
+ * blocks, or the extension isn't Mermaid) are intentionally left in
+ * the output — `stripAdfExtensions` runs immediately after this pass
+ * and removes them. Don't remove that second pass without auditing
+ * the leak surface here.
+ */
+function liftAdfExtensionLanguage(text: string): string {
+  const extRe =
+    /<ac:adf-extension(?:\s[^>]*)?>([\s\S]*?)<\/ac:adf-extension>/g;
+  const macroOpenRe =
+    /<ac:structured-macro\s+[^>]*ac:name="(?:code|noformat)"[^>]*>/gi;
+  const macroCloseLiteral = "</ac:structured-macro>";
+
+  let result = "";
+  let cursor = 0;
+  let m;
+  while ((m = extRe.exec(text)) !== null) {
+    const extStart = m.index;
+    const extEnd = extStart + m[0].length;
+    const extInner = m[1];
+
+    if (!extensionInnerIsMermaid(extInner)) continue;
+
+    // Find the closest preceding `</ac:structured-macro>` and verify
+    // the gap between it and the extension is only block wrappers.
+    const beforeExt = text.slice(cursor, extStart);
+    const macroCloseIdx = beforeExt.lastIndexOf(macroCloseLiteral);
+    if (macroCloseIdx < 0) continue;
+    const macroCloseEnd = macroCloseIdx + macroCloseLiteral.length;
+    const gap = beforeExt.slice(macroCloseEnd);
+    if (!isBlockWrapperGap(gap)) continue;
+
+    // Find the matching open tag for this close. Walk backward to the
+    // last code|noformat open in `beforeExt[0..macroCloseIdx]`.
+    macroOpenRe.lastIndex = 0;
+    let lastOpenStart = -1;
+    let lastOpenEnd = -1;
+    let om;
+    while ((om = macroOpenRe.exec(beforeExt)) !== null) {
+      if (om.index >= macroCloseIdx) break;
+      lastOpenStart = om.index;
+      lastOpenEnd = om.index + om[0].length;
+    }
+    if (lastOpenStart < 0) continue;
+
+    const macroOpen = beforeExt.slice(lastOpenStart, lastOpenEnd);
+    const macroBody = beforeExt.slice(lastOpenEnd, macroCloseIdx);
+    const macroFull = beforeExt.slice(lastOpenStart, macroCloseEnd);
+
+    const alreadyHasLanguage =
+      /<ac:parameter\s+ac:name="language"/i.test(macroFull);
+    const newMacro = alreadyHasLanguage
+      ? macroFull
+      : macroOpen +
+        '<ac:parameter ac:name="language">mermaid</ac:parameter>' +
+        macroBody +
+        macroCloseLiteral;
+
+    // Emit: text up to the macro, the rewritten macro, the gap
+    // (possibly `<p></p>` etc., harmless), and skip past the
+    // extension.
+    result += text.slice(cursor, cursor + lastOpenStart);
+    result += newMacro;
+    result += gap;
+    cursor = extEnd;
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
+/**
+ * The only content allowed between a code macro and the Mermaid
+ * extension that should still be considered a "pair": whitespace,
+ * paragraph wrappers, line breaks. Anything else (other macros,
+ * lists, tables, etc.) means they're not actually adjacent.
+ */
+function isBlockWrapperGap(gap: string): boolean {
+  return /^(?:\s|<\/?p[^>]*>|<br\s*\/?>)*$/i.test(gap);
+}
+
+// Confluence's Mermaid plugin uses extension keys of the form
+// `<uuid>/<uuid>/static/mermaid-diagram` — anchor on `/mermaid-diagram`
+// at end-of-string so unrelated keys containing that substring (e.g.
+// a hypothetical `static-mermaid-diagrams-v2`) don't trigger a lift.
+const MERMAID_KEY_RE = /\/mermaid-diagram$/;
+
+function extensionInnerIsMermaid(inner: string): boolean {
+  // Matches both attribute styles Confluence emits:
+  //   <ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>
+  //   key="extensionKey" (camelCase)
+  const m = inner.match(
+    /<ac:adf-attribute\s+key="extension[-_]?[Kk]ey"[^>]*>([\s\S]*?)<\/ac:adf-attribute>/
+  );
+  if (!m) return false;
+  return MERMAID_KEY_RE.test(m[1].trim());
+}
+
+/**
+ * Drop any remaining `<ac:adf-extension>` blocks. After the Mermaid
+ * lift in `liftAdfExtensionLanguage` the only ones left are
+ * standalone extensions (no preceding code macro to attach to) or
+ * non-Mermaid extension types. Either way, their payload is plugin
+ * orchestration metadata, not content for the agent.
+ *
+ * Required, not optional: `liftAdfExtensionLanguage` deliberately
+ * leaves un-paired extensions in the input string and relies on this
+ * pass to strip them. Removing this would leak extension keys, local
+ * ids, and the literal `"Mermaid diagram"` text payload into the
+ * markdown output (the catch-all tag stripper drops the wrapper but
+ * keeps the `<ac:adf-attribute>` text content).
+ */
+function stripAdfExtensions(text: string): string {
+  // Both forms: paired `<ac:adf-extension>...</ac:adf-extension>` and
+  // self-closing `<ac:adf-extension ... />`. The catch-all tag stripper
+  // would otherwise drop the wrapper but keep nested
+  // <ac:adf-attribute> text content (extension keys, local ids, etc.).
+  return text.replace(
+    /<ac:adf-extension(?:\s[^>]*)?\/>|<ac:adf-extension[^>]*>[\s\S]*?<\/ac:adf-extension>/g,
+    ""
+  );
 }
 
 /**

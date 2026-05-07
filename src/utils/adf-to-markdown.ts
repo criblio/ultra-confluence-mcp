@@ -23,11 +23,79 @@ export function adfToMarkdown(input: AdfDocument | string): string {
   const doc = typeof input === "string" ? parseAdf(input) : input;
   if (!doc || !Array.isArray(doc.content)) return "";
 
-  const blocks = doc.content
+  const normalized = liftMermaidLanguage(doc.content);
+  const blocks = normalized
     .map((node) => renderBlock(node, 0))
     .filter((s) => s !== "");
 
   return blocks.join("\n\n").trim();
+}
+
+/**
+ * Confluence's Mermaid plugin stores a diagram as TWO sibling ADF
+ * nodes: a `codeBlock` carrying the source (with no `language` attr,
+ * since Confluence's editor strips it for the macro), then an
+ * `extension` node whose `extensionKey` ends in `mermaid-diagram`
+ * telling the plugin how to render it.
+ *
+ * If we render the codeBlock raw and the extension separately, we
+ * lose the fact that the source was Mermaid — round-tripping through
+ * `confluence_update_page_from_markdown` would emit a plain code
+ * block, breaking the Mermaid plugin's render.
+ *
+ * Fix: walk the content recursively (Mermaid pairs can appear nested
+ * inside `panel`, `expand`, table cells, etc., not just at the doc
+ * root). When a codeBlock is followed by a Mermaid extension,
+ * retroactively tag the codeBlock `language: "mermaid"` and drop the
+ * extension. The extension carries no agent-useful information
+ * beyond "this preceding block was Mermaid".
+ */
+function liftMermaidLanguage(content: AdfNode[]): AdfNode[] {
+  const out: AdfNode[] = [];
+  for (let i = 0; i < content.length; i++) {
+    const node = content[i];
+    const next = content[i + 1];
+    if (
+      node.type === "codeBlock" &&
+      !node.attrs?.language &&
+      isMermaidExtension(next)
+    ) {
+      out.push({
+        ...node,
+        attrs: { ...(node.attrs ?? {}), language: "mermaid" },
+      });
+      i++; // consume the extension node
+      continue;
+    }
+    // Recurse into any nested content arrays so the lift fires
+    // anywhere a Mermaid pair appears (panel.content, expand.content,
+    // tableCell.content, blockquote.content, etc.).
+    if (Array.isArray(node.content) && node.content.length > 0) {
+      out.push({ ...node, content: liftMermaidLanguage(node.content) });
+    } else {
+      out.push(node);
+    }
+  }
+  return out;
+}
+
+// Confluence's Mermaid plugin uses keys of the form
+// `<uuid>/<uuid>/static/mermaid-diagram` — anchor on `/mermaid-diagram`
+// at end-of-string so we don't false-match on unrelated keys that happen
+// to contain the substring (e.g. `static-mermaid-diagrams-v2`).
+const MERMAID_KEY_RE = /\/mermaid-diagram$/;
+
+function isMermaidExtension(node: AdfNode | undefined): boolean {
+  if (!node) return false;
+  if (
+    node.type !== "extension" &&
+    node.type !== "bodiedExtension" &&
+    node.type !== "inlineExtension"
+  ) {
+    return false;
+  }
+  const key = node.attrs?.extensionKey;
+  return typeof key === "string" && MERMAID_KEY_RE.test(key);
 }
 
 function parseAdf(input: string): AdfDocument | null {

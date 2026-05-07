@@ -16,6 +16,11 @@ import { resolve } from "path";
 import { getConfig } from "../../src/config.js";
 import { ConfluenceClient } from "../../src/auth/confluence-client.js";
 import { handlePageTool } from "../../src/tools/pages.js";
+import { handleDescendantTool } from "../../src/tools/descendants.js";
+import type {
+  ConfluencePage,
+  MultiEntityResult,
+} from "../../src/types/confluence.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -136,27 +141,72 @@ describe.runIf(hasConfluenceEnv())(
   { timeout: 120_000 },
   () => {
     let client: ConfluenceClient;
+    // Per-run parent page so test artifacts nest under a single
+    // timestamped folder rather than cluttering the space root.
+    // Populated in beforeAll; threaded into every create-page call as
+    // `parentId`.
+    let testRunParentId: string;
 
-    // Track page IDs for cleanup
-    const createdPageIds: number[] = [];
-
-    beforeAll(() => {
+    beforeAll(async () => {
       const config = getConfig();
       client = new ConfluenceClient(config);
+
+      const parent = (await handlePageTool(
+        client,
+        "confluence_create_page_from_markdown",
+        {
+          spaceId: SPACE_ID,
+          title: `Integration Tests - ${TIMESTAMP}`,
+          markdown: `# Integration Tests\n\nTest run started ${TIMESTAMP}.\n`,
+        }
+      )) as PageResult;
+      testRunParentId = parent.id;
     });
 
-    // afterAll(async () => {
-    //   // Clean up all pages created during tests
-    //   for (const pageId of createdPageIds) {
-    //     try {
-    //       await handlePageTool(client, "confluence_delete_page", {
-    //         pageId,
-    //       });
-    //     } catch (e) {
-    //       console.error(`Cleanup: failed to delete page ${pageId}:`, e);
-    //     }
-    //   }
-    // });
+    afterAll(async () => {
+      // Cleanup: explicitly delete every descendant under the
+      // timestamped parent before deleting the parent itself.
+      // Confluence Cloud's `DELETE /pages/{id}` doesn't reliably
+      // cascade — depending on tenant config, children of a deleted
+      // parent get reparented to the grandparent (here, the Scotts
+      // space root), accumulating orphan `[IT]` pages over runs.
+      // Walking descendants first guarantees nothing is left behind.
+      if (!testRunParentId) return;
+      try {
+        const descendants = (await handleDescendantTool(
+          client,
+          "confluence_get_page_descendants",
+          { pageId: Number(testRunParentId), limit: 250 }
+        )) as MultiEntityResult<ConfluencePage>;
+        // Delete deepest-first so we never try to delete a page whose
+        // children are still attached. The descendants endpoint returns
+        // a flat list with depth info; sorting by descending `id` is a
+        // good-enough proxy for "created later" (Confluence ids are
+        // monotonic), and any reparenting that happens mid-loop is
+        // tolerated by the per-page try/catch below.
+        const ids = (descendants.results ?? [])
+          .map((p) => Number(p.id))
+          .filter((n) => Number.isFinite(n))
+          .sort((a, b) => b - a);
+        for (const id of ids) {
+          try {
+            await handlePageTool(client, "confluence_delete_page", {
+              pageId: id,
+            });
+          } catch (e) {
+            console.error(`Cleanup: failed to delete descendant ${id}:`, e);
+          }
+        }
+        await handlePageTool(client, "confluence_delete_page", {
+          pageId: Number(testRunParentId),
+        });
+      } catch (e) {
+        console.error(
+          `Cleanup: failed to delete parent ${testRunParentId}:`,
+          e
+        );
+      }
+    });
 
     // ── Storage Format Tools ───────────────────────────────────────────────
 
@@ -169,6 +219,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Storage Markdown - ${TIMESTAMP}`,
             markdown: simpleMermaidMarkdown,
           }
@@ -182,7 +233,6 @@ describe.runIf(hasConfluenceEnv())(
         expect(result.spaceId).toBe(SPACE_ID);
 
         pageId = result.id;
-        createdPageIds.push(Number(pageId));
       });
 
       it("should read back the page with storage body containing Confluence macros", { timeout: 30_000 }, async () => {
@@ -266,6 +316,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] ADF Markdown - ${TIMESTAMP}`,
             markdown: simpleMermaidMarkdown,
           }
@@ -279,7 +330,6 @@ describe.runIf(hasConfluenceEnv())(
         expect(result.spaceId).toBe(SPACE_ID);
 
         pageId = result.id;
-        createdPageIds.push(Number(pageId));
       });
 
       it("should read back the page with ADF body containing mermaid codeBlock", { timeout: 30_000 }, async () => {
@@ -393,6 +443,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Large Doc Storage - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -400,7 +451,6 @@ describe.runIf(hasConfluenceEnv())(
 
         expect(result.id).toBeDefined();
         storagePageId = result.id;
-        createdPageIds.push(Number(storagePageId));
       });
 
       it("should create a page from a large markdown file (ADF)", { timeout: 30_000 }, async () => {
@@ -409,6 +459,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Large Doc ADF - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -416,7 +467,6 @@ describe.runIf(hasConfluenceEnv())(
 
         expect(result.id).toBeDefined();
         adfPageId = result.id;
-        createdPageIds.push(Number(adfPageId));
       });
 
       it("should read back the large storage page with expected structure", { timeout: 30_000 }, async () => {
@@ -485,6 +535,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Short Doc Storage - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -502,6 +553,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Short Doc ADF - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -523,6 +575,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Long Doc Storage - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -540,6 +593,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Long Doc ADF - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -612,6 +666,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Springfield + Update (Storage) - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -644,6 +699,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Springfield + Update (ADF) - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -683,6 +739,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Create Storage - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -691,7 +748,6 @@ graph LR
         expect(result.id).toBeDefined();
         expect(result.title).toBe(`[IT] FilePath Create Storage - ${TIMESTAMP}`);
         expect(result.status).toBe("current");
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify content matches what's in the file
         const page = (await handlePageTool(
@@ -711,6 +767,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Create ADF - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -718,7 +775,6 @@ graph LR
 
         expect(result.id).toBeDefined();
         expect(result.title).toBe(`[IT] FilePath Create ADF - ${TIMESTAMP}`);
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify ADF structure
         const page = (await handlePageTool(
@@ -740,13 +796,13 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Update Storage - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
         )) as PageResult;
 
         expect(createResult.id).toBeDefined();
-        createdPageIds.push(Number(createResult.id));
 
         // Update with long file
         const updateResult = (await handlePageTool(
@@ -782,13 +838,13 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Update ADF - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
         )) as PageResult;
 
         expect(createResult.id).toBeDefined();
-        createdPageIds.push(Number(createResult.id));
 
         // Update with long file
         const updateResult = (await handlePageTool(
@@ -823,6 +879,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Precedence - ${TIMESTAMP}`,
             markdown: "# This should be ignored",
             markdownFilePath: shortFilePath,
@@ -830,7 +887,6 @@ graph LR
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         const page = (await handlePageTool(
           client,
@@ -865,24 +921,24 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: shortTitle,
             markdown: shortMarkdown,
           }
         )) as PageResult;
         expect(shortPage.id).toBeDefined();
-        createdPageIds.push(Number(shortPage.id));
 
         const longPage = (await handlePageTool(
           client,
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: longTitle,
             markdown: longMarkdown,
           }
         )) as PageResult;
         expect(longPage.id).toBeDefined();
-        createdPageIds.push(Number(longPage.id));
 
         // Now create the page that contains .md links to them
         const result = (await handlePageTool(
@@ -890,13 +946,13 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Links Doc Storage - ${TIMESTAMP}`,
             markdown: linksMarkdownWithTimestamp,
           }
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify links are present in storage format
         const page = (await handlePageTool(
@@ -949,13 +1005,13 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Links Doc ADF - ${TIMESTAMP}`,
             markdown: linksMarkdownWithTimestamp,
           }
         )) as PageResult;
 
         expect(result.id).toBeDefined();
-        createdPageIds.push(Number(result.id));
 
         // Read back and verify links are present in ADF format
         const page = (await handlePageTool(

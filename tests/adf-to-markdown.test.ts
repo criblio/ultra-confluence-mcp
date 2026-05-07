@@ -455,6 +455,223 @@ describe("adfToMarkdown — Confluence specifics", () => {
     });
     expect(md.trim()).toBe("```mermaid\ngraph TD; A-->B\n```");
   });
+
+  it("infers `language: mermaid` on a preceding language-less codeBlock when paired with the Mermaid extension", () => {
+    // This is what Confluence's ADF actually emits for a Mermaid
+    // diagram: the codeBlock carries the source with NO language attr,
+    // and a sibling extension node tells the Mermaid plugin to render.
+    // Without the lift, the agent would receive a plain ` ``` ` block
+    // and lose the language tag on round-trip.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          // no attrs.language — this is the bug condition
+          content: [
+            { type: "text", text: "sequenceDiagram\nA->>B: ping" },
+          ],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey:
+              "23392b90-4271-4239-98ca-a3e96c663cbb/63d4d207-ac2f-4273-865c-0240d37f044a/static/mermaid-diagram",
+            parameters: { localId: "test-mermaid-1" },
+            text: "Mermaid diagram",
+          },
+        },
+      ],
+    });
+    expect(md.trim()).toBe(
+      "```mermaid\nsequenceDiagram\nA->>B: ping\n```"
+    );
+  });
+
+  it("does NOT lift to mermaid when the codeBlock already has a language", () => {
+    // If the agent put an explicit language on the codeBlock, respect
+    // it — don't override with mermaid just because an unrelated
+    // extension happens to follow.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          attrs: { language: "ts" },
+          content: [{ type: "text", text: "const x = 1;" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey:
+              "23392b90/63d4d207/static/mermaid-diagram",
+          },
+        },
+      ],
+    });
+    expect(md.trim()).toBe("```ts\nconst x = 1;\n```");
+  });
+
+  it("does NOT lift when the following extension is not a Mermaid one", () => {
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "x" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.atlassian.ecosystem",
+            extensionKey: "some-other-extension/v1/widget",
+            text: "Other widget",
+          },
+        },
+      ],
+    });
+    // codeBlock renders plain (no language inferred), and the extension
+    // renders its placeholder.
+    expect(md).toContain("```\nx\n```");
+    expect(md).toContain("Other widget");
+  });
+
+  it("lifts a Mermaid pair nested inside a panel (not just at the doc root)", () => {
+    // Regression: previously the lift only walked doc.content, so a
+    // pair inside panel/expand/tableCell silently dropped the language.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "panel",
+          attrs: { panelType: "info" },
+          content: [
+            {
+              type: "codeBlock",
+              content: [{ type: "text", text: "graph TD; A-->B" }],
+            },
+            {
+              type: "extension",
+              attrs: {
+                extensionKey:
+                  "23392b90/63d4d207/static/mermaid-diagram",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("```mermaid");
+    expect(md).toContain("> ```mermaid");
+    expect(md).toContain("> graph TD; A-->B");
+    expect(md).toContain("> ```");
+    // Critical: the language must NOT be missing (regression marker).
+    expect(md).not.toMatch(/^> ```\n/m);
+  });
+
+  it("lifts a Mermaid pair nested inside an expand block", () => {
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "expand",
+          attrs: { title: "Diagram" },
+          content: [
+            {
+              type: "codeBlock",
+              content: [{ type: "text", text: "flowchart LR; X-->Y" }],
+            },
+            {
+              type: "extension",
+              attrs: {
+                extensionKey: "ext/static/mermaid-diagram",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("<details><summary>Diagram</summary>");
+    expect(md).toContain("```mermaid\nflowchart LR; X-->Y\n```");
+  });
+
+  it("does not leak the Mermaid extension's text payload when nested in a table cell", () => {
+    // Table cells render inline content only. The lift should consume
+    // the extension regardless — leaving the cell with just the source
+    // text rather than appending a placeholder for the dropped node.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  content: [
+                    {
+                      type: "codeBlock",
+                      content: [{ type: "text", text: "A-->B" }],
+                    },
+                    {
+                      type: "extension",
+                      attrs: {
+                        extensionKey: "x/mermaid-diagram",
+                        text: "Mermaid diagram",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    // Critically: the extension's `text` attr ("Mermaid diagram") must
+    // NOT leak into the cell. Before the recursive lift, it would
+    // render as a separate `[Mermaid diagram]` placeholder.
+    expect(md).not.toContain("[Mermaid diagram]");
+    expect(md).toContain("A-->B");
+  });
+
+  it("does NOT lift when the extension key only contains 'mermaid-diagram' as a substring (anchored match)", () => {
+    // Regression: previously a substring `includes("mermaid-diagram")`
+    // check would also fire on unrelated keys like
+    // `static-mermaid-diagrams-v2`. The lift must only match the
+    // canonical `/mermaid-diagram` suffix.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "x = 1" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.example",
+            extensionKey: "static/mermaid-diagrams-v2",
+            text: "Not a real mermaid",
+          },
+        },
+      ],
+    });
+    // The codeBlock must stay plain (no `mermaid` injected).
+    expect(md).toContain("```\nx = 1\n```");
+    expect(md).not.toContain("```mermaid");
+  });
 });
 
 describe("adfToMarkdown — input handling", () => {
