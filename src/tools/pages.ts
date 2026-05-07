@@ -300,10 +300,12 @@ export const pageTools = [
   {
     name: "confluence_create_page_from_markdown",
     description:
-      "Create a new page from Markdown content. Automatically converts Markdown to Confluence storage format. " +
-      "Supports headings, bold/italic/strikethrough, links, images, ordered/unordered lists, tables, blockquotes, " +
-      "code blocks with syntax highlighting, Mermaid diagrams (via ```mermaid code blocks), inline code, and horizontal rules. " +
-      "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits.",
+      "Create a new page from Markdown. Converts to Atlassian Document Format (ADF) — the recommended path for modern Confluence Cloud. " +
+      "Renders ```mermaid code blocks natively as Mermaid diagrams (via the Confluence Mermaid app). " +
+      "Supports headings, bold/italic/strikethrough, links, images (as external media), ordered/unordered lists, tables, blockquotes, " +
+      "code blocks with syntax highlighting, inline code, and horizontal rules. " +
+      "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits. " +
+      "Use `confluence_create_page_from_markdown_legacy` only if the target instance has ADF disabled.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -344,10 +346,12 @@ export const pageTools = [
   {
     name: "confluence_update_page_from_markdown",
     description:
-      "Update an existing page from Markdown content. Automatically converts Markdown to Confluence storage format. " +
-      "Supports headings, bold/italic/strikethrough, links, images, ordered/unordered lists, tables, blockquotes, " +
-      "code blocks with syntax highlighting, Mermaid diagrams (via ```mermaid code blocks), inline code, and horizontal rules. " +
-      "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits.",
+      "Update an existing page from Markdown. Converts to Atlassian Document Format (ADF) — the recommended path for modern Confluence Cloud. " +
+      "Renders ```mermaid code blocks natively as Mermaid diagrams (via the Confluence Mermaid app). " +
+      "Supports headings, bold/italic/strikethrough, links, images (as external media), ordered/unordered lists, tables, blockquotes, " +
+      "code blocks with syntax highlighting, inline code, and horizontal rules. " +
+      "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits. " +
+      "Use `confluence_update_page_from_markdown_legacy` only if the target instance has ADF disabled.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -391,12 +395,13 @@ export const pageTools = [
     },
   },
   {
-    name: "confluence_create_page_from_markdown_adf",
+    name: "confluence_create_page_from_markdown_legacy",
     description:
-      "Create a new page from Markdown content using Atlassian Document Format (ADF). Automatically converts Markdown to ADF JSON. " +
-      "Preferred for Mermaid diagrams (rendered natively by Confluence Mermaid apps via ```mermaid code blocks). " +
-      "Also supports headings, bold/italic/strikethrough, links, images (as external media), ordered/unordered lists, tables, blockquotes, " +
-      "code blocks with syntax highlighting, inline code, and horizontal rules. " +
+      "Legacy: create a page using Confluence storage format (XHTML). Prefer `confluence_create_page_from_markdown` (ADF) — " +
+      "use this only when targeting an instance that has ADF disabled. " +
+      "Supports headings, bold/italic/strikethrough, links, images, ordered/unordered lists, tables, blockquotes, " +
+      "code blocks (with syntax highlighting), inline code, and horizontal rules. ```mermaid code blocks render as " +
+      "syntax-highlighted code, NOT as Mermaid diagrams (the storage code macro can't host the Mermaid extension). " +
       "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits.",
     inputSchema: {
       type: "object" as const,
@@ -436,12 +441,13 @@ export const pageTools = [
     },
   },
   {
-    name: "confluence_update_page_from_markdown_adf",
+    name: "confluence_update_page_from_markdown_legacy",
     description:
-      "Update an existing page from Markdown content using Atlassian Document Format (ADF). Automatically converts Markdown to ADF JSON. " +
-      "Preferred for Mermaid diagrams (rendered natively by Confluence Mermaid apps via ```mermaid code blocks). " +
-      "Also supports headings, bold/italic/strikethrough, links, images (as external media), ordered/unordered lists, tables, blockquotes, " +
-      "code blocks with syntax highlighting, inline code, and horizontal rules. " +
+      "Legacy: update a page using Confluence storage format (XHTML). Prefer `confluence_update_page_from_markdown` (ADF) — " +
+      "use this only when targeting an instance that has ADF disabled. " +
+      "Supports headings, bold/italic/strikethrough, links, images, ordered/unordered lists, tables, blockquotes, " +
+      "code blocks (with syntax highlighting), inline code, and horizontal rules. ```mermaid code blocks render as " +
+      "syntax-highlighted code, NOT as Mermaid diagrams (the storage code macro can't host the Mermaid extension). " +
       "For large documents, use markdownFilePath instead of markdown to avoid tool call size limits.",
     inputSchema: {
       type: "object" as const,
@@ -550,6 +556,29 @@ const GetPagesForLabelSchema = z.object({
   limit: z.coerce.number().optional(),
 });
 
+const CreatePageFromMarkdownLegacySchema = z
+  .object({
+    spaceId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    parentId: z.string().optional(),
+    status: z.enum(["current", "draft"]).optional(),
+  })
+  .strict();
+
+const UpdatePageFromMarkdownLegacySchema = z
+  .object({
+    pageId: z.string(),
+    title: z.string(),
+    markdown: z.string().optional(),
+    markdownFilePath: z.string().optional(),
+    version: z.coerce.number(),
+    status: z.enum(["current", "draft"]).optional(),
+    versionMessage: z.string().optional(),
+  })
+  .strict();
+
 const CreatePageFromMarkdownSchema = z
   .object({
     spaceId: z.string(),
@@ -562,29 +591,6 @@ const CreatePageFromMarkdownSchema = z
   .strict();
 
 const UpdatePageFromMarkdownSchema = z
-  .object({
-    pageId: z.string(),
-    title: z.string(),
-    markdown: z.string().optional(),
-    markdownFilePath: z.string().optional(),
-    version: z.coerce.number(),
-    status: z.enum(["current", "draft"]).optional(),
-    versionMessage: z.string().optional(),
-  })
-  .strict();
-
-const CreatePageFromMarkdownAdfSchema = z
-  .object({
-    spaceId: z.string(),
-    title: z.string(),
-    markdown: z.string().optional(),
-    markdownFilePath: z.string().optional(),
-    parentId: z.string().optional(),
-    status: z.enum(["current", "draft"]).optional(),
-  })
-  .strict();
-
-const UpdatePageFromMarkdownAdfSchema = z
   .object({
     pageId: z.string(),
     title: z.string(),
@@ -768,8 +774,8 @@ export async function handlePageTool(
       );
     }
 
-    case "confluence_create_page_from_markdown": {
-      const input = CreatePageFromMarkdownSchema.parse(args);
+    case "confluence_create_page_from_markdown_legacy": {
+      const input = CreatePageFromMarkdownLegacySchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
       const storageBody = markdownToStorageFormat(md);
 
@@ -788,8 +794,8 @@ export async function handlePageTool(
       return client.post<ConfluencePageSingle>("/pages", body);
     }
 
-    case "confluence_update_page_from_markdown": {
-      const input = UpdatePageFromMarkdownSchema.parse(args);
+    case "confluence_update_page_from_markdown_legacy": {
+      const input = UpdatePageFromMarkdownLegacySchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
       const storageBody = markdownToStorageFormat(md);
 
@@ -810,8 +816,8 @@ export async function handlePageTool(
       return client.put<ConfluencePageSingle>(`/pages/${input.pageId}`, body);
     }
 
-    case "confluence_create_page_from_markdown_adf": {
-      const input = CreatePageFromMarkdownAdfSchema.parse(args);
+    case "confluence_create_page_from_markdown": {
+      const input = CreatePageFromMarkdownSchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
       const adfDoc = markdownToAdf(md);
       await resolveMdLinksInAdf(client, adfDoc, input.spaceId);
@@ -831,8 +837,8 @@ export async function handlePageTool(
       return client.post<ConfluencePageSingle>("/pages", body);
     }
 
-    case "confluence_update_page_from_markdown_adf": {
-      const input = UpdatePageFromMarkdownAdfSchema.parse(args);
+    case "confluence_update_page_from_markdown": {
+      const input = UpdatePageFromMarkdownSchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
       const adfDoc = markdownToAdf(md);
 

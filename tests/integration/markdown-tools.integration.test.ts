@@ -86,7 +86,7 @@ graph LR
 ## Code Block
 
 \`\`\`typescript
-const result = await handlePageTool(client, "confluence_create_page_from_markdown", {
+const result = await handlePageTool(client, "confluence_create_page_from_markdown_legacy", {
   spaceId: "5353898365",
   title: "Test Page",
   markdown: "# Hello World",
@@ -153,7 +153,7 @@ describe.runIf(hasConfluenceEnv())(
 
       const parent = (await handlePageTool(
         client,
-        "confluence_create_page_from_markdown",
+        "confluence_create_page_from_markdown_legacy",
         {
           spaceId: SPACE_ID,
           title: `Integration Tests - ${TIMESTAMP}`,
@@ -216,7 +216,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create a page from markdown", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -268,7 +268,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should update the page from markdown", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown",
+          "confluence_update_page_from_markdown_legacy",
           {
             pageId,
             title: `[IT] Storage Markdown Updated - ${TIMESTAMP}`,
@@ -313,7 +313,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create a page from markdown via ADF", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -378,7 +378,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should update the page from markdown via ADF", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown_adf",
+          "confluence_update_page_from_markdown",
           {
             pageId,
             title: `[IT] ADF Markdown Updated - ${TIMESTAMP}`,
@@ -440,7 +440,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create a page from a large markdown file (storage)", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -456,7 +456,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create a page from a large markdown file (ADF)", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -532,7 +532,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create short doc page via storage format", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -550,7 +550,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create short doc page via ADF format", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -572,7 +572,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create long doc page via storage format", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -590,7 +590,7 @@ describe.runIf(hasConfluenceEnv())(
       it("should create long doc page via ADF format", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -663,7 +663,7 @@ graph LR
       it("should create long doc (storage), then update with addendum", { timeout: 60_000 }, async () => {
         const createResult = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -677,7 +677,7 @@ graph LR
 
         const updateResult = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown",
+          "confluence_update_page_from_markdown_legacy",
           {
             pageId: storagePageId,
             title: `[IT] Springfield + Update (Storage) - ${TIMESTAMP}`,
@@ -696,7 +696,7 @@ graph LR
       it("should create long doc (ADF), then update with addendum", { timeout: 60_000 }, async () => {
         const createResult = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -710,7 +710,7 @@ graph LR
 
         const updateResult = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown_adf",
+          "confluence_update_page_from_markdown",
           {
             pageId: adfPageId,
             title: `[IT] Springfield + Update (ADF) - ${TIMESTAMP}`,
@@ -736,7 +736,7 @@ graph LR
       it("should create a page from markdownFilePath (storage)", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -764,7 +764,7 @@ graph LR
       it("should create a page from markdownFilePath (ADF)", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -793,7 +793,7 @@ graph LR
         // Create with short file
         const createResult = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -807,7 +807,7 @@ graph LR
         // Update with long file
         const updateResult = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown",
+          "confluence_update_page_from_markdown_legacy",
           {
             pageId: createResult.id,
             title: `[IT] FilePath Update Storage - ${TIMESTAMP}`,
@@ -835,7 +835,7 @@ graph LR
         // Create with short file
         const createResult = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -849,7 +849,7 @@ graph LR
         // Update with long file
         const updateResult = (await handlePageTool(
           client,
-          "confluence_update_page_from_markdown_adf",
+          "confluence_update_page_from_markdown",
           {
             pageId: createResult.id,
             title: `[IT] FilePath Update ADF - ${TIMESTAMP}`,
@@ -876,7 +876,7 @@ graph LR
       it("should prefer markdownFilePath over markdown when both are provided", { timeout: 30_000 }, async () => {
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -918,7 +918,7 @@ graph LR
         // Page titles match the filenames without .md extension.
         const shortPage = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -930,7 +930,7 @@ graph LR
 
         const longPage = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -943,7 +943,7 @@ graph LR
         // Now create the page that contains .md links to them
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown",
+          "confluence_create_page_from_markdown_legacy",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,
@@ -1002,7 +1002,7 @@ graph LR
         // Target pages were already created by the storage test above
         const result = (await handlePageTool(
           client,
-          "confluence_create_page_from_markdown_adf",
+          "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
             parentId: testRunParentId,

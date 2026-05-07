@@ -40,8 +40,8 @@ export const TOOL_TRIM_MAP: Record<string, TrimKind> = {
   confluence_update_page: "page",
   confluence_create_page_from_markdown: "page",
   confluence_update_page_from_markdown: "page",
-  confluence_create_page_from_markdown_adf: "page",
-  confluence_update_page_from_markdown_adf: "page",
+  confluence_create_page_from_markdown_legacy: "page",
+  confluence_update_page_from_markdown_legacy: "page",
 
   // Ancestors are page-shaped but a flat array, no body
   confluence_get_page_ancestors: "ancestorList",
