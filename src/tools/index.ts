@@ -41,11 +41,15 @@ interface ObjectSchema {
 const FULL_ARG_DESCRIPTION =
   "If true, bypass response trimming and return the raw Confluence API response.";
 
+const FULL_HINT_SENTENCE =
+  "Output is trimmed by default (drops _links, _expandable, body content, etc.); pass full=true to receive the raw Confluence response.";
+
 /**
  * Inject the `full` escape-hatch arg into the inputSchema of every tool
- * whose response is trimmed. Done centrally so per-file tool definitions
- * don't have to repeat the boilerplate, and new tools pick it up the
- * moment they're added to TOOL_TRIM_MAP.
+ * whose response is trimmed, and append a hint to its description so
+ * agents discover the arg without inspecting the schema. Done centrally
+ * so per-file tool definitions don't have to repeat the boilerplate, and
+ * new tools pick it up the moment they're added to TOOL_TRIM_MAP.
  */
 function injectFullArg(tool: Tool): Tool {
   if (getTrimKind(tool.name) === "passthrough") return tool;
@@ -61,17 +65,24 @@ function injectFullArg(tool: Tool): Tool {
 
   const objSchema = schema as ObjectSchema;
   const properties = objSchema.properties ?? {};
-  if ("full" in properties) return tool;
+  const alreadyInjected = "full" in properties;
+
+  const description = tool.description.includes("full=true")
+    ? tool.description
+    : `${tool.description.replace(/\s*$/, "")} ${FULL_HINT_SENTENCE}`;
 
   return {
     ...tool,
-    inputSchema: {
-      ...objSchema,
-      properties: {
-        ...properties,
-        full: { type: "boolean", description: FULL_ARG_DESCRIPTION },
-      },
-    },
+    description,
+    inputSchema: alreadyInjected
+      ? objSchema
+      : {
+          ...objSchema,
+          properties: {
+            ...properties,
+            full: { type: "boolean", description: FULL_ARG_DESCRIPTION },
+          },
+        },
   };
 }
 

@@ -40,7 +40,7 @@ export const pageTools = [
   {
     name: "confluence_get_pages",
     description:
-      "Get all pages. Returns pages filtered by various parameters. Results are paginated - use the returned cursor to fetch more pages if you don't find what you need. Output is trimmed by default (no body, _links, or _expandable); pass full=true to receive the raw Confluence response.",
+      "Get all pages. Returns pages filtered by various parameters. Results are paginated - use the returned cursor to fetch more pages if you don't find what you need.",
     inputSchema: {
       type: "object" as const,
       properties: {

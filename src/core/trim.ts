@@ -33,13 +33,11 @@ function project(kind: TrimKind, raw: unknown): unknown {
 
   switch (kind) {
     case "page":
+    case "blogPost":
       return projectPage(raw);
     case "pageList":
-      return projectList(raw, projectPageNoBody);
-    case "blogPost":
-      return projectBlogPost(raw);
     case "blogPostList":
-      return projectList(raw, projectBlogPostNoBody);
+      return projectList(raw, projectPageNoBody);
     case "comment":
       return projectComment(raw);
     case "commentList":
@@ -129,7 +127,7 @@ function trimVersion(version: unknown): unknown {
   return pick(version, ["number", "createdAt", "message"]);
 }
 
-// ---- Pages ----
+// ---- Pages and blog posts (same shape) ----
 
 function projectPageBase(p: Record<string, unknown>): Record<string, unknown> {
   const out = pick(p, [
@@ -149,7 +147,7 @@ function projectPageBase(p: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Single-page projection: includes a placeholder for body presence. */
+/** Single page/blog-post: includes a placeholder for body presence. */
 function projectPage(raw: unknown): unknown {
   if (!isObject(raw)) return raw;
   const out = projectPageBase(raw);
@@ -158,39 +156,16 @@ function projectPage(raw: unknown): unknown {
   }
   // Optional sub-collections requested via includeLabels/etc — keep their
   // results array but drop the meta/_links wrapper.
-  passthroughIncludes(raw, out);
-  return out;
-}
-
-function projectPageNoBody(p: Record<string, unknown>): unknown {
-  return projectPageBase(p);
-}
-
-function passthroughIncludes(
-  raw: Record<string, unknown>,
-  out: Record<string, unknown>
-): void {
   for (const key of ["labels", "properties", "operations", "likes", "versions"] as const) {
     const sub = raw[key];
     if (isObject(sub) && Array.isArray(sub.results)) {
       out[key] = sub.results;
     }
   }
-}
-
-// ---- Blog posts (same shape as pages) ----
-
-function projectBlogPost(raw: unknown): unknown {
-  if (!isObject(raw)) return raw;
-  const out = projectPageBase(raw);
-  if (isObject(raw.body)) {
-    out.bodyAvailable = true;
-  }
-  passthroughIncludes(raw, out);
   return out;
 }
 
-function projectBlogPostNoBody(p: Record<string, unknown>): unknown {
+function projectPageNoBody(p: Record<string, unknown>): unknown {
   return projectPageBase(p);
 }
 
