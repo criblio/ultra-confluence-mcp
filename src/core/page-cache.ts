@@ -17,11 +17,16 @@
  * overridden via `CONFLUENCE_BODY_CACHE_DIR`. Pruning runs on startup
  * and removes files older than `CONFLUENCE_BODY_CACHE_TTL_DAYS` (default
  * 7 days).
+ *
+ * Per-file size cap: writes above `CONFLUENCE_BODY_CACHE_MAX_BYTES`
+ * (default 5MB) throw `BodyCacheTooLargeError` so the trim layer can
+ * fall through to an inline excerpt rather than fill the disk.
  */
 
-import { readFile, writeFile, mkdir, readdir, stat, rm } from "node:fs/promises";
+import { writeFile, mkdir, readdir, stat, rm, rename, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve, join, isAbsolute } from "node:path";
+import { resolve, join, isAbsolute, relative } from "node:path";
+import { randomBytes } from "node:crypto";
 
 export type CacheKind = "pages" | "blogposts" | "comments";
 
@@ -31,13 +36,23 @@ export interface RawBody {
 }
 
 const DEFAULT_TTL_DAYS = 7;
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024; // 5MB per file
+
+export class BodyCacheTooLargeError extends Error {
+  constructor(public readonly bytes: number, public readonly max: number) {
+    super(
+      `body would exceed cache size cap (${bytes} > ${max}); pass through to inline excerpt`
+    );
+    this.name = "BodyCacheTooLargeError";
+  }
+}
 
 export function getCacheRoot(): string {
   const override = process.env.CONFLUENCE_BODY_CACHE_DIR;
   if (override && override.length > 0) {
     return resolve(override);
   }
-  return join(tmpdir(), "confluence-mcp");
+  return resolve(join(tmpdir(), "confluence-mcp"));
 }
 
 function getTtlMs(): number {
@@ -49,6 +64,19 @@ function getTtlMs(): number {
   return days * 24 * 60 * 60 * 1000;
 }
 
+function getMaxBytes(): number {
+  const raw = process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+  if (raw === undefined || raw === "") return DEFAULT_MAX_BYTES;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_BYTES;
+}
+
+/**
+ * Sanitize a path component derived from possibly-untrusted input
+ * (Confluence ids can contain unusual characters depending on token
+ * scope/server config). Replaces anything outside `[A-Za-z0-9_-]` with
+ * `_` so the resulting filename can't escape the cache directory.
+ */
 function sanitizeIdComponent(s: string | number): string {
   return String(s).replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -58,17 +86,27 @@ function buildBodyPath(
   id: string | number,
   version: number
 ): string {
+  // `version: number` always serializes to `[0-9]+`, so no sanitization
+  // needed there — only `id` is potentially user-controlled.
   return join(
     getCacheRoot(),
     kind,
-    `${sanitizeIdComponent(id)}-v${sanitizeIdComponent(version)}.json`
+    `${sanitizeIdComponent(id)}-v${String(version)}.json`
   );
 }
 
 /**
  * Write the raw body wrapper to disk and return the absolute path.
- * Re-uses an existing file when one is already present (write is
- * idempotent — same id+version always lands at the same path).
+ *
+ * Atomic via tmp + rename: the JSON is written to
+ * `${path}.${pid}-${rand}.tmp` and renamed into place once flushed, so
+ * a concurrent reader never observes a partial file. Two writers for
+ * the same id+version may race the rename; the loser's tmp file is
+ * cleaned up by `rename`'s overwrite semantics.
+ *
+ * Throws `BodyCacheTooLargeError` when the serialized body exceeds
+ * `CONFLUENCE_BODY_CACHE_MAX_BYTES`. Callers should treat this as a
+ * signal to fall back to an inline excerpt rather than abort.
  */
 export async function writePageBody(
   kind: CacheKind,
@@ -76,9 +114,25 @@ export async function writePageBody(
   version: number,
   body: RawBody
 ): Promise<string> {
+  const json = JSON.stringify(body);
+  const max = getMaxBytes();
+  if (json.length > max) {
+    throw new BodyCacheTooLargeError(json.length, max);
+  }
+
   const path = buildBodyPath(kind, id, version);
   await mkdir(join(getCacheRoot(), kind), { recursive: true });
-  await writeFile(path, JSON.stringify(body), "utf-8");
+
+  const tmpPath = `${path}.${process.pid}-${randomBytes(4).toString(
+    "hex"
+  )}.tmp`;
+  await writeFile(tmpPath, json, "utf-8");
+  try {
+    await rename(tmpPath, path);
+  } catch (err) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw err;
+  }
   return path;
 }
 
@@ -92,7 +146,11 @@ export async function readPageBody(path: string): Promise<RawBody> {
     throw new Error(`bodyPath must be absolute: ${path}`);
   }
   const root = getCacheRoot();
-  if (!path.startsWith(root + "/") && path !== root) {
+  const rel = relative(root, path);
+  // `path.relative` produces an empty string when `path === root`, a
+  // path starting with `..` when `path` is outside `root`, and an
+  // absolute path on Windows when the two are on different drives.
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(
       `bodyPath is outside the cache root (${root}): ${path}`
     );
@@ -118,19 +176,32 @@ export async function readPageBody(path: string): Promise<RawBody> {
 }
 
 /**
- * Remove cache entries older than the configured TTL. Best-effort:
- * silently swallows errors so a broken cache directory can't crash
- * server startup.
+ * Remove cache entries older than the configured TTL. Best-effort: a
+ * broken cache directory can't crash server startup, but failures are
+ * logged to stderr so they're not silently lost. Set
+ * `CONFLUENCE_BODY_CACHE_DEBUG=1` to log the cutoff timestamp too.
  */
 export async function prunePageCache(): Promise<void> {
   const root = getCacheRoot();
   const ttl = getTtlMs();
   const cutoff = Date.now() - ttl;
 
+  if (process.env.CONFLUENCE_BODY_CACHE_DEBUG) {
+    console.error(
+      `[confluence-mcp] pruning ${root}, cutoff ${new Date(
+        cutoff
+      ).toISOString()}`
+    );
+  }
+
   let kinds: string[];
   try {
     kinds = await readdir(root);
-  } catch {
+  } catch (err) {
+    // ENOENT on the root is normal (first run); log everything else.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(`[confluence-mcp] prune readdir(${root}) failed:`, err);
+    }
     return;
   }
 
@@ -140,7 +211,11 @@ export async function prunePageCache(): Promise<void> {
       let entries: string[];
       try {
         entries = await readdir(dir);
-      } catch {
+      } catch (err) {
+        console.error(
+          `[confluence-mcp] prune readdir(${dir}) failed:`,
+          err
+        );
         return;
       }
       await Promise.all(
@@ -151,8 +226,11 @@ export async function prunePageCache(): Promise<void> {
             if (st.mtimeMs < cutoff) {
               await rm(path, { force: true });
             }
-          } catch {
-            /* ignore */
+          } catch (err) {
+            console.error(
+              `[confluence-mcp] prune stat/rm(${path}) failed:`,
+              err
+            );
           }
         })
       );

@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
+  BodyCacheTooLargeError,
   prunePageCache,
   readPageBody,
   writePageBody,
@@ -154,6 +155,104 @@ describe("writePageBody / readPageBody", () => {
     await expect(readPageBody(path)).rejects.toThrow(
       /value, representation/
     );
+  });
+});
+
+describe("readPageBody — cross-platform path containment", () => {
+  it("accepts a legitimate path (relative-based check, not string-prefix)", async () => {
+    // Regression: the previous string-prefix check `startsWith(root + "/")`
+    // failed for every legitimate Windows path because the separator was
+    // hardcoded as `/`. Now uses `path.relative(root, path)`.
+    const path = await writePageBody("pages", 1234, 1, {
+      value: "ok",
+      representation: "storage",
+    });
+    await expect(readPageBody(path)).resolves.toBeDefined();
+  });
+
+  it("rejects a path that shares a string prefix but is outside the cache root", async () => {
+    // E.g. cache root `/tmp/cache`, attacker passes `/tmp/cache-but-elsewhere`.
+    // Naive `startsWith(root)` would accept this; `relative` correctly rejects.
+    const sibling = `${tmpRoot}-sibling/x.json`;
+    await expect(readPageBody(sibling)).rejects.toThrow(
+      /outside the cache root/
+    );
+  });
+});
+
+describe("writePageBody — atomic write", () => {
+  it("does not leave .tmp files behind on success", async () => {
+    const path = await writePageBody("pages", 9999, 1, {
+      value: "x",
+      representation: "storage",
+    });
+    const dir = join(tmpRoot, "pages");
+    const entries = await readdir(dir);
+    expect(entries).toContain("9999-v1.json");
+    // No leftover .tmp.* files after a successful write.
+    expect(entries.every((e) => !e.includes(".tmp"))).toBe(true);
+    expect(path.endsWith("9999-v1.json")).toBe(true);
+  });
+
+  it("survives concurrent writers for the same id+version (last writer wins, no torn JSON)", async () => {
+    // Run 8 parallel writes with distinct payloads. Whichever wins the
+    // rename race, the resulting file must always parse cleanly.
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        writePageBody("pages", 5555, 1, {
+          value: `payload-${i}`,
+          representation: "storage",
+        })
+      )
+    );
+    const path = join(tmpRoot, "pages", "5555-v1.json");
+    const round = await readPageBody(path);
+    expect(round.representation).toBe("storage");
+    expect(round.value).toMatch(/^payload-\d$/);
+  });
+});
+
+describe("writePageBody — size cap", () => {
+  it("rejects bodies above CONFLUENCE_BODY_CACHE_MAX_BYTES with BodyCacheTooLargeError", async () => {
+    process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "100";
+    try {
+      const big = "x".repeat(500);
+      let caught: unknown;
+      try {
+        await writePageBody("pages", 7777, 1, {
+          value: big,
+          representation: "storage",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(BodyCacheTooLargeError);
+      expect((caught as BodyCacheTooLargeError).max).toBe(100);
+    } finally {
+      delete process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+    }
+  });
+
+  it("does not cap below the configured threshold", async () => {
+    process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "10000";
+    try {
+      const small = "x".repeat(200);
+      const path = await writePageBody("pages", 7778, 1, {
+        value: small,
+        representation: "storage",
+      });
+      expect(path).toBeDefined();
+    } finally {
+      delete process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+    }
+  });
+});
+
+describe("getCacheRoot — fallback is resolved", () => {
+  it("returns an absolute (resolved) path even when CONFLUENCE_BODY_CACHE_DIR is unset", () => {
+    delete process.env.CONFLUENCE_BODY_CACHE_DIR;
+    const root = getCacheRoot();
+    expect(root).toBe(resolve(root));
   });
 });
 

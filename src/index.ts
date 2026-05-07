@@ -176,14 +176,17 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
-  // Best-effort prune of stale on-disk page cache entries. Errors are
-  // swallowed inside prunePageCache so a broken cache dir can't block
-  // server startup.
-  await prunePageCache();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Confluence MCP server running on stdio");
+
+  // Best-effort prune of stale on-disk page cache entries. Fire-and-
+  // forget so a cold cache with thousands of entries can't delay the
+  // MCP transport from accepting traffic. Errors are logged inside
+  // prunePageCache.
+  void prunePageCache().catch((err) => {
+    console.error("[confluence-mcp] prunePageCache rejected:", err);
+  });
 }
 
 main().catch((error) => {

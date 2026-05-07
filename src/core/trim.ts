@@ -15,6 +15,7 @@
 import { adfToMarkdown } from "../utils/adf-to-markdown.js";
 import { storageXhtmlToMarkdown } from "../utils/storage-to-markdown.js";
 import {
+  BodyCacheTooLargeError,
   CacheKind,
   RawBody,
   writePageBody,
@@ -63,20 +64,39 @@ async function offloadOversizeBodies(value: unknown): Promise<void> {
   const pending = value[OFFLOAD_MARKER];
   if (isOffloadRequest(pending)) {
     delete value[OFFLOAD_MARKER];
-    try {
-      const path = await writePageBody(
-        pending.kind,
-        pending.id,
-        pending.version,
-        pending.body
+
+    if (pending.skipCache) {
+      // Couldn't safely cache (e.g. unknown version → would collide on
+      // disk). Surface a partial excerpt instead of a `bodyPath`.
+      applyExcerptFallback(
+        value,
+        pending,
+        pending.skipCacheReason ?? "cache skipped"
       );
-      value.bodyPath = path;
-    } catch (err) {
-      // Cache write failure shouldn't block the read — fall back to
-      // an excerpt so the agent at least gets something usable.
-      value.bodyMarkdown = pending.excerpt;
-      value.bodyCacheError =
-        err instanceof Error ? err.message : String(err);
+    } else {
+      try {
+        const path = await writePageBody(
+          pending.kind,
+          pending.id,
+          pending.version,
+          pending.body
+        );
+        value.bodyPath = path;
+        value.bodyFullSize = pending.fullSize;
+      } catch (err) {
+        // Body too big to cache → expected, fall back without alarming
+        // the agent. Other errors still surface as bodyCacheError.
+        if (err instanceof BodyCacheTooLargeError) {
+          applyExcerptFallback(value, pending, "body exceeds cache size cap");
+        } else {
+          applyExcerptFallback(
+            value,
+            pending,
+            err instanceof Error ? err.message : String(err),
+            { isError: true }
+          );
+        }
+      }
     }
   }
 
@@ -90,12 +110,39 @@ async function offloadOversizeBodies(value: unknown): Promise<void> {
   }
 }
 
+/**
+ * Apply the no-cache fallback shape: a `bodyMarkdownPartial` excerpt
+ * (distinct from `bodyMarkdown` so callers can't conflate a complete
+ * inline body with a partial fallback) plus a brief reason. When the
+ * fallback is the result of a true cache failure, also expose
+ * `bodyCacheError` so observability tooling can pick it up.
+ */
+function applyExcerptFallback(
+  out: Record<string, unknown>,
+  pending: OffloadRequest,
+  reason: string,
+  opts: { isError?: boolean } = {}
+): void {
+  out.bodyMarkdownPartial = pending.excerpt;
+  out.bodyFullSize = pending.fullSize;
+  out.bodyCacheSkippedReason = reason;
+  if (opts.isError) {
+    out.bodyCacheError = reason;
+  }
+}
+
 interface OffloadRequest {
   kind: CacheKind;
   id: string | number;
   version: number;
   body: RawBody;
   excerpt: string;
+  fullSize: number;
+  // When true, the projector decided up-front not to cache (e.g. version
+  // unknown — same id+v0 would collide across reads). The async pass
+  // skips the write entirely and goes straight to the excerpt fallback.
+  skipCache?: boolean;
+  skipCacheReason?: string;
 }
 
 const OFFLOAD_MARKER = "__pendingOffload" as const;
@@ -248,9 +295,15 @@ function projectPage(raw: unknown, kind: CacheKind): unknown {
 }
 
 /**
- * Convert `raw.body` to markdown and either inline it or queue an
- * on-disk offload (resolved later by `offloadOversizeBodies`) when it
- * exceeds `BODY_INLINE_LIMIT`. Drops the original body shape regardless.
+ * Convert `raw.body` to markdown. Inlines it (`bodyMarkdown`) when
+ * small. When it exceeds `BODY_INLINE_LIMIT` queues an on-disk offload
+ * (resolved later by `offloadOversizeBodies`). Drops the original body
+ * shape regardless.
+ *
+ * If the response is missing a version number we *don't* cache —
+ * different page revisions would otherwise collide at `{id}-v0.json`.
+ * The async pass falls through to a `bodyMarkdownPartial` excerpt
+ * instead, with `bodyCacheSkippedReason` explaining why.
  */
 function attachBodyMarkdown(
   raw: Record<string, unknown>,
@@ -267,33 +320,49 @@ function attachBodyMarkdown(
   }
 
   const markdown = renderRawBody(rawBody);
-  out.bodyFullSize = markdown.length;
-
   const limit = getBodyInlineLimit();
+
   if (markdown.length <= limit) {
+    // Small body: inline only. `bodyFullSize` is intentionally NOT set
+    // here — historically it signaled "this was trimmed" and callers
+    // may rely on that conditional emission.
     out.bodyMarkdown = markdown;
     return;
   }
 
-  // Markdown is too big to inline — queue the raw body for offload.
-  // The async pass in applyTrim() turns this into a `bodyPath` ref.
-  const id = typeof raw.id === "string" || typeof raw.id === "number" ? raw.id : "unknown";
+  // Body exceeds the inline limit. Queue for offload (or excerpt
+  // fallback) — the async pass in applyTrim() finalizes the shape.
+  const id =
+    typeof raw.id === "string" || typeof raw.id === "number"
+      ? raw.id
+      : "unknown";
   const version = readVersionNumber(raw.version);
   const offload: OffloadRequest = {
     kind,
     id,
-    version,
+    version: version ?? 0,
     body: rawBody,
-    excerpt: `${markdown.slice(0, limit)}\n\n[truncated — call confluence_render_body with bodyPath]`,
+    fullSize: markdown.length,
+    excerpt: `${markdown.slice(0, limit)}\n\n[truncated — call confluence_render_body with bodyPath, or pass full=true to refetch]`,
   };
+  if (version === undefined) {
+    offload.skipCache = true;
+    offload.skipCacheReason =
+      "version missing on response — caching by id alone would collide";
+  }
   out[OFFLOAD_MARKER] = offload;
 }
 
-function readVersionNumber(version: unknown): number {
+/**
+ * Returns the response's version number, or `undefined` when missing.
+ * Distinct from "version 0" — agents can have v0 pages, so falling
+ * back to 0 would silently collide on disk.
+ */
+function readVersionNumber(version: unknown): number | undefined {
   if (isObject(version) && typeof version.number === "number") {
     return version.number;
   }
-  return 0;
+  return undefined;
 }
 
 /**

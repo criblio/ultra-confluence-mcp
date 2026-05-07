@@ -421,6 +421,81 @@ describe("projectPage — body conversion", () => {
     expect(trimmed.bodyAvailable).toBeUndefined();
     expect(trimmed.bodyPath).toBeUndefined();
   });
+
+  it("does NOT emit bodyFullSize for small inline bodies (preserves the 'is this trimmed?' signal)", async () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      version: { number: 1 },
+      body: {
+        storage: { value: "<p>tiny</p>", representation: "storage" },
+      },
+    };
+    const trimmed = await trim("confluence_get_page", raw);
+    expect(typeof trimmed.bodyMarkdown).toBe("string");
+    expect(trimmed.bodyFullSize).toBeUndefined();
+  });
+
+  it("falls back to bodyMarkdownPartial when version is missing (cache would collide on disk)", async () => {
+    process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
+    try {
+      const longText = "x".repeat(500);
+      const raw = {
+        id: "42",
+        title: "T",
+        // version intentionally absent.
+        body: {
+          storage: {
+            value: `<p>${longText}</p>`,
+            representation: "storage",
+          },
+        },
+      };
+      const trimmed = await trim("confluence_get_page", raw);
+      expect(trimmed.bodyPath).toBeUndefined();
+      expect(trimmed.bodyMarkdown).toBeUndefined();
+      expect(typeof trimmed.bodyMarkdownPartial).toBe("string");
+      expect(typeof trimmed.bodyCacheSkippedReason).toBe("string");
+      expect((trimmed.bodyCacheSkippedReason as string).toLowerCase()).toContain(
+        "version"
+      );
+      // Not an error — skip is intentional, not a failure.
+      expect(trimmed.bodyCacheError).toBeUndefined();
+      expect(typeof trimmed.bodyFullSize).toBe("number");
+    } finally {
+      delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+    }
+  });
+
+  it("falls back to bodyMarkdownPartial when the body is too large for the cache size cap", async () => {
+    process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
+    process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "200";
+    try {
+      const longText = "x".repeat(2000);
+      const raw = {
+        id: "42",
+        title: "T",
+        version: { number: 1 },
+        body: {
+          storage: {
+            value: `<p>${longText}</p>`,
+            representation: "storage",
+          },
+        },
+      };
+      const trimmed = await trim("confluence_get_page", raw);
+      expect(trimmed.bodyPath).toBeUndefined();
+      expect(typeof trimmed.bodyMarkdownPartial).toBe("string");
+      expect((trimmed.bodyCacheSkippedReason as string).toLowerCase()).toContain(
+        "size cap"
+      );
+      // BodyCacheTooLargeError is an expected fallback, not an error.
+      expect(trimmed.bodyCacheError).toBeUndefined();
+    } finally {
+      delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+      delete process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+    }
+  });
 });
 
 describe("nullish handling", () => {

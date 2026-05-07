@@ -64,7 +64,7 @@ describe("confluence_render_body", () => {
     expect(result.bodyMarkdown).toContain("body text");
   });
 
-  it("returns the raw {value, representation} when format=raw", async () => {
+  it("returns the raw source under bodyRaw when format=raw (same envelope as markdown)", async () => {
     const path = await writePageBody("pages", 102, 1, {
       value: "<p>abc</p>",
       representation: "storage",
@@ -75,9 +75,22 @@ describe("confluence_render_body", () => {
     })) as Record<string, unknown>;
 
     expect(result).toEqual({
-      value: "<p>abc</p>",
+      bodyRaw: "<p>abc</p>",
       representation: "storage",
+      sourceLength: 10,
     });
+    // Markdown branch wraps in `bodyMarkdown`; raw branch wraps in
+    // `bodyRaw`. Either way, `representation` and `sourceLength` are
+    // always present, so callers don't have to branch on the shape.
+    expect(result.bodyMarkdown).toBeUndefined();
+  });
+
+  it("declares format=markdown as the default in inputSchema", async () => {
+    const { bodyTools } = await import("../src/tools/body.js");
+    const tool = bodyTools.find((t) => t.name === "confluence_render_body");
+    const props = (tool?.inputSchema as { properties?: Record<string, unknown> })
+      .properties;
+    expect((props?.format as { default?: string }).default).toBe("markdown");
   });
 
   it("rejects bodyPath outside the cache root", async () => {
