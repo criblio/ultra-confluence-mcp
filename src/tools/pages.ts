@@ -653,7 +653,7 @@ export async function handlePageTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      queryParams["body-format"] = input.bodyFormat ?? "atlas_doc_format";
       if (input.getDraft) queryParams["get-draft"] = input.getDraft;
       if (input.version) queryParams["version"] = input.version;
       if (input.includeLabels) queryParams["include-labels"] = true;

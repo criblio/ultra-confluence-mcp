@@ -1,26 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Marked, type Token, type Tokens } from "marked";
+import type { AdfDocument, AdfMark, AdfNode } from "../types/adf.js";
 
-// ─── ADF Type Definitions ────────────────────────────────────────────────────
-
-interface AdfMark {
-  type: string;
-  attrs?: Record<string, unknown>;
-}
-
-interface AdfNode {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: AdfNode[];
-  text?: string;
-  marks?: AdfMark[];
-}
-
-export interface AdfDocument {
-  type: "doc";
-  content: AdfNode[];
-  version: 1;
-}
+export type { AdfDocument, AdfMark, AdfNode };
 
 // ─── Mermaid Extension ───────────────────────────────────────────────────────
 

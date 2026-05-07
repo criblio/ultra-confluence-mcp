@@ -248,7 +248,7 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      queryParams["body-format"] = input.bodyFormat ?? "atlas_doc_format";
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
@@ -280,7 +280,7 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      queryParams["body-format"] = input.bodyFormat ?? "atlas_doc_format";
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
@@ -295,7 +295,7 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      queryParams["body-format"] = input.bodyFormat ?? "atlas_doc_format";
 
       return client.get<ConfluenceFooterComment>(
         `/footer-comments/${input.commentId}`,
