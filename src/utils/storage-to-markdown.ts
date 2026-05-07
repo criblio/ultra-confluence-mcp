@@ -133,6 +133,12 @@ function restoreProtectedBlocks(text: string, table: string[]): string {
  * regex) because Confluence frequently wraps each node in `<p>` —
  * the previous "macro followed by extension separated only by `\s*`"
  * approach missed every wrapped pair.
+ *
+ * Non-paired extensions (no preceding code macro, gap contains other
+ * blocks, or the extension isn't Mermaid) are intentionally left in
+ * the output — `stripAdfExtensions` runs immediately after this pass
+ * and removes them. Don't remove that second pass without auditing
+ * the leak surface here.
  */
 function liftAdfExtensionLanguage(text: string): string {
   const extRe =
@@ -208,6 +214,12 @@ function isBlockWrapperGap(gap: string): boolean {
   return /^(?:\s|<\/?p[^>]*>|<br\s*\/?>)*$/i.test(gap);
 }
 
+// Confluence's Mermaid plugin uses extension keys of the form
+// `<uuid>/<uuid>/static/mermaid-diagram` — anchor on `/mermaid-diagram`
+// at end-of-string so unrelated keys containing that substring (e.g.
+// a hypothetical `static-mermaid-diagrams-v2`) don't trigger a lift.
+const MERMAID_KEY_RE = /\/mermaid-diagram$/;
+
 function extensionInnerIsMermaid(inner: string): boolean {
   // Matches both attribute styles Confluence emits:
   //   <ac:adf-attribute key="extension-key">.../mermaid-diagram</ac:adf-attribute>
@@ -216,7 +228,7 @@ function extensionInnerIsMermaid(inner: string): boolean {
     /<ac:adf-attribute\s+key="extension[-_]?[Kk]ey"[^>]*>([\s\S]*?)<\/ac:adf-attribute>/
   );
   if (!m) return false;
-  return m[1].includes("mermaid-diagram");
+  return MERMAID_KEY_RE.test(m[1].trim());
 }
 
 /**
@@ -225,6 +237,13 @@ function extensionInnerIsMermaid(inner: string): boolean {
  * standalone extensions (no preceding code macro to attach to) or
  * non-Mermaid extension types. Either way, their payload is plugin
  * orchestration metadata, not content for the agent.
+ *
+ * Required, not optional: `liftAdfExtensionLanguage` deliberately
+ * leaves un-paired extensions in the input string and relies on this
+ * pass to strip them. Removing this would leak extension keys, local
+ * ids, and the literal `"Mermaid diagram"` text payload into the
+ * markdown output (the catch-all tag stripper drops the wrapper but
+ * keeps the `<ac:adf-attribute>` text content).
  */
 function stripAdfExtensions(text: string): string {
   // Both forms: paired `<ac:adf-extension>...</ac:adf-extension>` and

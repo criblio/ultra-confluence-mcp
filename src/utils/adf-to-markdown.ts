@@ -79,6 +79,12 @@ function liftMermaidLanguage(content: AdfNode[]): AdfNode[] {
   return out;
 }
 
+// Confluence's Mermaid plugin uses keys of the form
+// `<uuid>/<uuid>/static/mermaid-diagram` — anchor on `/mermaid-diagram`
+// at end-of-string so we don't false-match on unrelated keys that happen
+// to contain the substring (e.g. `static-mermaid-diagrams-v2`).
+const MERMAID_KEY_RE = /\/mermaid-diagram$/;
+
 function isMermaidExtension(node: AdfNode | undefined): boolean {
   if (!node) return false;
   if (
@@ -89,7 +95,7 @@ function isMermaidExtension(node: AdfNode | undefined): boolean {
     return false;
   }
   const key = node.attrs?.extensionKey;
-  return typeof key === "string" && key.includes("mermaid-diagram");
+  return typeof key === "string" && MERMAID_KEY_RE.test(key);
 }
 
 function parseAdf(input: string): AdfDocument | null {

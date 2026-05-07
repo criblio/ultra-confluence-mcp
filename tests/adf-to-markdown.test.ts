@@ -644,6 +644,34 @@ describe("adfToMarkdown — Confluence specifics", () => {
     expect(md).not.toContain("[Mermaid diagram]");
     expect(md).toContain("A-->B");
   });
+
+  it("does NOT lift when the extension key only contains 'mermaid-diagram' as a substring (anchored match)", () => {
+    // Regression: previously a substring `includes("mermaid-diagram")`
+    // check would also fire on unrelated keys like
+    // `static-mermaid-diagrams-v2`. The lift must only match the
+    // canonical `/mermaid-diagram` suffix.
+    const md = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "x = 1" }],
+        },
+        {
+          type: "extension",
+          attrs: {
+            extensionType: "com.example",
+            extensionKey: "static/mermaid-diagrams-v2",
+            text: "Not a real mermaid",
+          },
+        },
+      ],
+    });
+    // The codeBlock must stay plain (no `mermaid` injected).
+    expect(md).toContain("```\nx = 1\n```");
+    expect(md).not.toContain("```mermaid");
+  });
 });
 
 describe("adfToMarkdown — input handling", () => {

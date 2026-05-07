@@ -50,6 +50,19 @@ const DEFAULT_PAGE_IDS = [5356749914, 5426874944, 5425597351, 5358485527];
 
 const SPACE_ID = process.env.BENCH_SPACE_ID ?? DEFAULT_SPACE_ID;
 
+if (
+  !process.env.BENCH_SPACE_ID &&
+  !process.env.BENCH_PAGE_IDS &&
+  !process.env.BENCH_DISCOVER_FROM
+) {
+  console.warn(
+    "bench: no BENCH_* env vars set — using author defaults (Scotts space, " +
+      "page ids that only exist in the author's tenant). If you're not the " +
+      "author, expect 404s. Set BENCH_DISCOVER_FROM=<spaceId> to auto-pick " +
+      "representative pages from your own tenant. See docs/BENCHMARK.md.\n"
+  );
+}
+
 const NUMBER_FORMAT = new Intl.NumberFormat("en-US");
 function fmt(n) {
   return NUMBER_FORMAT.format(n);
@@ -162,6 +175,13 @@ async function labelTargets(client, ids) {
       console.error(`bench: skipping page ${id}: ${err.message}`);
     }
   }
+  if (out.length === 0) {
+    throw new Error(
+      `bench: no usable page targets (tried ${ids.length} ids — see errors ` +
+        `above). Set BENCH_PAGE_IDS or BENCH_DISCOVER_FROM to point at pages ` +
+        `that exist in your tenant.`
+    );
+  }
   return out;
 }
 
@@ -211,6 +231,11 @@ async function measurePageList(client) {
 // ─── Per-call cost (CQL search) ─────────────────────────────────────────────
 
 async function measureCqlSearch(client, label, cql, limit = 25) {
+  // Uses getV1 (legacy `/wiki/rest/api/search`) intentionally: the v2
+  // `/search` endpoint rejects `type=folder` ("Provided value {search}
+  // for 'generic-content-type' is not the correct type") so the
+  // folder-search scenario can't run through the v2 surface. Text
+  // search is on v1 too for parity. Not an oversight.
   const raw = await client.getV1("/search", { cql, limit });
   const rawBytes = jsonBytes(raw);
   const trimmed = await applyTrim("confluence_cql_search", raw, {});

@@ -409,6 +409,25 @@ describe("storageXhtmlToMarkdown — Confluence macros", () => {
     expect(out).not.toContain("abc-123");
   });
 
+  it("does NOT lift when the extension key only contains 'mermaid-diagram' as a substring (anchored match)", () => {
+    // Regression: previously a substring `includes("mermaid-diagram")`
+    // check would also fire on keys like `static-mermaid-diagrams-v2`,
+    // misattributing language=mermaid to an unrelated code macro. The
+    // lift must only match the canonical `/mermaid-diagram` suffix.
+    const xml =
+      '<ac:structured-macro ac:name="code">' +
+      "<ac:plain-text-body><![CDATA[const x = 1;]]></ac:plain-text-body>" +
+      "</ac:structured-macro>" +
+      '<ac:adf-extension><ac:adf-node type="extension">' +
+      '<ac:adf-attribute key="extension-key">static/mermaid-diagrams-v2</ac:adf-attribute>' +
+      "</ac:adf-node></ac:adf-extension>";
+    const out = trim(storageXhtmlToMarkdown(xml));
+    // The code macro stays plain; the extension is stripped by the
+    // catch-all stripAdfExtensions pass either way.
+    expect(out).toBe("```\nconst x = 1;\n```");
+    expect(out).not.toContain("```mermaid");
+  });
+
   it("renders self-closing macros (e.g. toc) as a placeholder rather than dropping them", () => {
     expect(trim(storageXhtmlToMarkdown('<ac:structured-macro ac:name="toc"/>'))).toBe(
       "[macro: toc]"

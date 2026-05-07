@@ -16,6 +16,11 @@ import { resolve } from "path";
 import { getConfig } from "../../src/config.js";
 import { ConfluenceClient } from "../../src/auth/confluence-client.js";
 import { handlePageTool } from "../../src/tools/pages.js";
+import { handleDescendantTool } from "../../src/tools/descendants.js";
+import type {
+  ConfluencePage,
+  MultiEntityResult,
+} from "../../src/types/confluence.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -159,13 +164,39 @@ describe.runIf(hasConfluenceEnv())(
     });
 
     afterAll(async () => {
-      // Cleanup: deleting the timestamped parent page cascades to all
-      // children, so a single delete is enough regardless of how many
-      // [IT] pages each test created. Runs even when individual tests
-      // fail so the Scotts space doesn't accumulate one
-      // `Integration Tests - {ts}` parent per run.
+      // Cleanup: explicitly delete every descendant under the
+      // timestamped parent before deleting the parent itself.
+      // Confluence Cloud's `DELETE /pages/{id}` doesn't reliably
+      // cascade — depending on tenant config, children of a deleted
+      // parent get reparented to the grandparent (here, the Scotts
+      // space root), accumulating orphan `[IT]` pages over runs.
+      // Walking descendants first guarantees nothing is left behind.
       if (!testRunParentId) return;
       try {
+        const descendants = (await handleDescendantTool(
+          client,
+          "confluence_get_page_descendants",
+          { pageId: Number(testRunParentId), limit: 250 }
+        )) as MultiEntityResult<ConfluencePage>;
+        // Delete deepest-first so we never try to delete a page whose
+        // children are still attached. The descendants endpoint returns
+        // a flat list with depth info; sorting by descending `id` is a
+        // good-enough proxy for "created later" (Confluence ids are
+        // monotonic), and any reparenting that happens mid-loop is
+        // tolerated by the per-page try/catch below.
+        const ids = (descendants.results ?? [])
+          .map((p) => Number(p.id))
+          .filter((n) => Number.isFinite(n))
+          .sort((a, b) => b - a);
+        for (const id of ids) {
+          try {
+            await handlePageTool(client, "confluence_delete_page", {
+              pageId: id,
+            });
+          } catch (e) {
+            console.error(`Cleanup: failed to delete descendant ${id}:`, e);
+          }
+        }
         await handlePageTool(client, "confluence_delete_page", {
           pageId: Number(testRunParentId),
         });
