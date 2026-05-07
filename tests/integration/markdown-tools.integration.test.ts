@@ -136,13 +136,30 @@ describe.runIf(hasConfluenceEnv())(
   { timeout: 120_000 },
   () => {
     let client: ConfluenceClient;
+    // Per-run parent page so test artifacts nest under a single
+    // timestamped folder rather than cluttering the space root.
+    // Populated in beforeAll; threaded into every create-page call as
+    // `parentId`.
+    let testRunParentId: string;
 
     // Track page IDs for cleanup
     const createdPageIds: number[] = [];
 
-    beforeAll(() => {
+    beforeAll(async () => {
       const config = getConfig();
       client = new ConfluenceClient(config);
+
+      const parent = (await handlePageTool(
+        client,
+        "confluence_create_page_from_markdown",
+        {
+          spaceId: SPACE_ID,
+          title: `Integration Tests - ${TIMESTAMP}`,
+          markdown: `# Integration Tests\n\nTest run started ${TIMESTAMP}.\n`,
+        }
+      )) as PageResult;
+      testRunParentId = parent.id;
+      createdPageIds.push(Number(testRunParentId));
     });
 
     // afterAll(async () => {
@@ -169,6 +186,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Storage Markdown - ${TIMESTAMP}`,
             markdown: simpleMermaidMarkdown,
           }
@@ -266,6 +284,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] ADF Markdown - ${TIMESTAMP}`,
             markdown: simpleMermaidMarkdown,
           }
@@ -393,6 +412,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Large Doc Storage - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -409,6 +429,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Large Doc ADF - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -485,6 +506,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Short Doc Storage - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -502,6 +524,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Short Doc ADF - ${TIMESTAMP}`,
             markdown: shortMarkdown,
           }
@@ -523,6 +546,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Long Doc Storage - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -540,6 +564,7 @@ describe.runIf(hasConfluenceEnv())(
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Long Doc ADF - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -612,6 +637,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Springfield + Update (Storage) - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -644,6 +670,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Springfield + Update (ADF) - ${TIMESTAMP}`,
             markdown: longMarkdown,
           }
@@ -683,6 +710,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Create Storage - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -711,6 +739,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Create ADF - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -740,6 +769,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Update Storage - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -782,6 +812,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Update ADF - ${TIMESTAMP}`,
             markdownFilePath: shortFilePath,
           }
@@ -823,6 +854,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] FilePath Precedence - ${TIMESTAMP}`,
             markdown: "# This should be ignored",
             markdownFilePath: shortFilePath,
@@ -865,6 +897,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: shortTitle,
             markdown: shortMarkdown,
           }
@@ -877,6 +910,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: longTitle,
             markdown: longMarkdown,
           }
@@ -890,6 +924,7 @@ graph LR
           "confluence_create_page_from_markdown",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Links Doc Storage - ${TIMESTAMP}`,
             markdown: linksMarkdownWithTimestamp,
           }
@@ -949,6 +984,7 @@ graph LR
           "confluence_create_page_from_markdown_adf",
           {
             spaceId: SPACE_ID,
+            parentId: testRunParentId,
             title: `[IT] Links Doc ADF - ${TIMESTAMP}`,
             markdown: linksMarkdownWithTimestamp,
           }
