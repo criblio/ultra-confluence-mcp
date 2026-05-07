@@ -101,6 +101,40 @@ describe("adfToMarkdown — basic blocks", () => {
     expect(md).toBe("[click](https://example.com)");
   });
 
+  it("falls back to bare label when link href is missing or empty", () => {
+    const missing = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "click", marks: [{ type: "link", attrs: {} }] },
+          ],
+        },
+      ],
+    });
+    expect(missing).toBe("click");
+
+    const empty = adfToMarkdown({
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "click",
+              marks: [{ type: "link", attrs: { href: "" } }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(empty).toBe("click");
+  });
+
   it("converts a horizontal rule", () => {
     const md = adfToMarkdown({
       type: "doc",

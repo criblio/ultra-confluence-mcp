@@ -272,7 +272,8 @@ const GetBlogPostsInSpaceSchema = z.object({
 export async function handleBlogPostTool(
   client: ConfluenceClient,
   toolName: string,
-  args: unknown
+  args: unknown,
+  full = false
 ): Promise<unknown> {
   switch (toolName) {
     case "confluence_get_blog_posts": {
@@ -298,7 +299,11 @@ export async function handleBlogPostTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      queryParams["body-format"] = input.bodyFormat ?? "atlas_doc_format";
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.getDraft) queryParams["get-draft"] = input.getDraft;
       if (input.version) queryParams["version"] = input.version;
       if (input.includeLabels) queryParams["include-labels"] = true;

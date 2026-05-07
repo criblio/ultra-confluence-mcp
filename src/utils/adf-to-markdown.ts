@@ -403,7 +403,9 @@ function applyMarks(text: string, marks: AdfMark[]): string {
   if (link) {
     const href =
       typeof link.attrs?.href === "string" ? link.attrs.href : "";
-    out = `[${out}](${href})`;
+    // Empty hrefs produce invalid markdown like `[label]()` — fall back to
+    // the bare label.
+    if (href) out = `[${out}](${href})`;
   }
 
   return out;

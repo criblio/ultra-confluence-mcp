@@ -215,16 +215,16 @@ export async function handleTool(
   let raw: unknown;
   switch (category) {
     case "page":
-      raw = await handlePageTool(client, toolName, rest);
+      raw = await handlePageTool(client, toolName, rest, full);
       break;
     case "space":
       raw = await handleSpaceTool(client, toolName, rest);
       break;
     case "blogPost":
-      raw = await handleBlogPostTool(client, toolName, rest);
+      raw = await handleBlogPostTool(client, toolName, rest, full);
       break;
     case "comment":
-      raw = await handleCommentTool(client, toolName, rest);
+      raw = await handleCommentTool(client, toolName, rest, full);
       break;
     case "attachment":
       raw = await handleAttachmentTool(client, toolName, rest);

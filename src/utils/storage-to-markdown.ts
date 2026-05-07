@@ -39,7 +39,10 @@ const NAMED_ENTITIES: Record<string, string> = {
 export function storageXhtmlToMarkdown(input: string): string {
   if (typeof input !== "string" || input.length === 0) return "";
 
-  let text = input;
+  // 0. Encode angle brackets inside quoted attribute values so downstream
+  //    regexes (which use [^>]* to scan attributes) don't terminate early
+  //    on a literal '>' that's actually part of an attribute value.
+  let text = encodeAngleBracketsInAttrs(input);
 
   // 1. Resolve macros first (they can contain XHTML inside).
   text = resolveMacros(text);
@@ -60,17 +63,136 @@ export function storageXhtmlToMarkdown(input: string): string {
 
   // 4. Strip any remaining XML/HTML tags except the markdown-friendly ones
   //    we emit ourselves (details/summary, u for underlines if any).
-  text = text.replace(/<\/?([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g, (m, tag) => {
-    const lower = (tag as string).toLowerCase();
-    if (lower === "details" || lower === "summary" || lower === "u") return m;
-    return "";
-  });
+  text = stripRemainingTags(text);
 
   // 5. Decode entities and normalize whitespace.
   text = decodeEntities(text);
   text = collapseBlankLines(text);
 
   return text.trim();
+}
+
+/**
+ * Walk the input and entity-encode `<` and `>` that appear inside quoted
+ * attribute values (`...="..."` or `...='...'`). Without this, a regex
+ * like `<p[^>]*>` truncates at the first `>` inside an attribute value,
+ * which leaves the rest of the value as stray text once the (mis-matched)
+ * tag is stripped.
+ */
+function encodeAngleBracketsInAttrs(input: string): string {
+  let out = "";
+  let i = 0;
+  while (i < input.length) {
+    const ch = input[i];
+    if (ch !== "<") {
+      out += ch;
+      i++;
+      continue;
+    }
+    const next = input[i + 1];
+    const isTagStart =
+      next === "/" || next === "!" || next === "?" || /[a-zA-Z]/.test(next ?? "");
+    if (!isTagStart) {
+      out += ch;
+      i++;
+      continue;
+    }
+    // Inside a tag — copy chars, encoding angle brackets that appear
+    // inside a quoted attribute value, until the (real) closing '>'.
+    let j = i;
+    let quote: '"' | "'" | null = null;
+    let segment = "";
+    while (j < input.length) {
+      const c = input[j];
+      if (quote) {
+        if (c === quote) {
+          quote = null;
+          segment += c;
+        } else if (c === "<") {
+          segment += "&lt;";
+        } else if (c === ">") {
+          segment += "&gt;";
+        } else {
+          segment += c;
+        }
+      } else if (c === '"' || c === "'") {
+        quote = c;
+        segment += c;
+      } else if (c === ">") {
+        segment += c;
+        j++;
+        break;
+      } else {
+        segment += c;
+      }
+      j++;
+    }
+    out += segment;
+    i = j;
+  }
+  return out;
+}
+
+const KEEP_TAGS = new Set(["details", "summary", "u"]);
+
+/**
+ * Strip XHTML/XML tags from `text`, preserving the small allowlist used
+ * by markdown output (`<details>`, `<summary>`, `<u>`).
+ *
+ * Quote-aware: angle brackets inside `"..."` or `'...'` attribute values
+ * are not treated as tag delimiters. This matters because some real
+ * Confluence storage emits `title="<...>"` and similar; the previous
+ * regex-only stripper would mis-tokenize and corrupt surrounding text.
+ */
+function stripRemainingTags(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch !== "<") {
+      out += ch;
+      i++;
+      continue;
+    }
+    // Look at what follows '<'. If not a plausible tag start, emit literally.
+    const next = text[i + 1];
+    const isTagStart =
+      next === "/" || next === "!" || next === "?" || /[a-zA-Z]/.test(next ?? "");
+    if (!isTagStart) {
+      out += ch;
+      i++;
+      continue;
+    }
+
+    // Walk until the matching '>', skipping over quoted regions.
+    let j = i + 1;
+    let quote: '"' | "'" | null = null;
+    while (j < text.length) {
+      const c = text[j];
+      if (quote) {
+        if (c === quote) quote = null;
+      } else if (c === '"' || c === "'") {
+        quote = c;
+      } else if (c === ">") {
+        break;
+      }
+      j++;
+    }
+    if (j >= text.length) {
+      // Unterminated — emit the rest literally rather than swallow it.
+      out += text.slice(i);
+      break;
+    }
+
+    const tagSrc = text.slice(i, j + 1);
+    const m = tagSrc.match(/^<\/?([a-zA-Z][a-zA-Z0-9-]*)/);
+    const name = m ? m[1].toLowerCase() : "";
+    if (name && KEEP_TAGS.has(name)) {
+      out += tagSrc;
+    }
+    i = j + 1;
+  }
+  return out;
 }
 
 function decodeEntities(text: string): string {
@@ -93,14 +215,27 @@ function collapseBlankLines(text: string): string {
 // ─── Macros ──────────────────────────────────────────────────────────────────
 
 function resolveMacros(text: string): string {
-  const macroRegex =
-    /<ac:structured-macro\s+([^>]*?)>([\s\S]*?)<\/ac:structured-macro>/g;
+  // Closed form: <ac:structured-macro ...>body</ac:structured-macro>
+  let out = text.replace(
+    /<ac:structured-macro\s+([^>]*?)>([\s\S]*?)<\/ac:structured-macro>/g,
+    (_full, attrsStr, body) => {
+      const name = extractAcAttr(attrsStr, "ac:name");
+      if (!name) return "";
+      return renderMacro(name, body);
+    }
+  );
 
-  return text.replace(macroRegex, (_full, attrsStr, body) => {
-    const name = extractAcAttr(attrsStr, "ac:name");
-    if (!name) return "";
-    return renderMacro(name, body);
-  });
+  // Self-closing form: <ac:structured-macro ... /> (e.g. toc, page-properties-report)
+  out = out.replace(
+    /<ac:structured-macro\s+([^>]*?)\/>/g,
+    (_full, attrsStr) => {
+      const name = extractAcAttr(attrsStr, "ac:name");
+      if (!name) return "";
+      return renderMacro(name, "");
+    }
+  );
+
+  return out;
 }
 
 function extractAcAttr(attrs: string, key: string): string | undefined {
@@ -263,7 +398,7 @@ function cellTextToInline(html: string): string {
   let text = html.replace(/<\/?p[^>]*>/gi, " ");
   text = resolveLinks(text);
   text = resolveInlineMarks(text);
-  text = text.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  text = stripRemainingTags(text);
   text = decodeEntities(text);
   return text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
 }
@@ -276,46 +411,179 @@ function pad(arr: string[], n: number): string[] {
 // ─── Lists ───────────────────────────────────────────────────────────────────
 
 function resolveLists(text: string): string {
-  // Iteratively resolve from the deepest list outward.
-  let prev = "";
-  let out = text;
-  while (prev !== out) {
-    prev = out;
-    out = out.replace(
-      /<(ul|ol)[^>]*>([\s\S]*?)<\/\1>/i,
-      (_m, tag, body) => renderList(body, tag.toLowerCase() === "ol", 0)
-    );
+  // Recursive descent: find each top-level <ul>/<ol> and walk its tree.
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const open = findNextListOpen(text, i);
+    if (!open) {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, open.start);
+    const end = findMatchingListClose(text, open.openEnd, open.tag);
+    if (end < 0) {
+      // Unbalanced — degrade to leaving the rest as-is.
+      out += text.slice(open.start);
+      break;
+    }
+    const body = text.slice(open.openEnd, end);
+    out += `\n${renderList(body, open.tag === "ol", 0)}\n`;
+    i = end + `</${open.tag}>`.length;
   }
   return out;
 }
 
+interface ListOpen {
+  start: number;
+  openEnd: number;
+  tag: "ul" | "ol";
+}
+
+function findNextListOpen(text: string, from: number): ListOpen | null {
+  const re = /<(ul|ol)\b[^>]*>/gi;
+  re.lastIndex = from;
+  const m = re.exec(text);
+  if (!m) return null;
+  return {
+    start: m.index,
+    openEnd: m.index + m[0].length,
+    tag: m[1].toLowerCase() as "ul" | "ol",
+  };
+}
+
+/**
+ * Find the index of the matching `</tag>` after `from`, accounting for
+ * nested same-tag pairs.
+ */
+function findMatchingListClose(
+  text: string,
+  from: number,
+  tag: "ul" | "ol"
+): number {
+  const open = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+  const close = new RegExp(`<\\/${tag}\\s*>`, "gi");
+  let depth = 1;
+  let cursor = from;
+  while (cursor < text.length) {
+    open.lastIndex = cursor;
+    close.lastIndex = cursor;
+    const o = open.exec(text);
+    const c = close.exec(text);
+    if (!c) return -1;
+    if (o && o.index < c.index) {
+      depth++;
+      cursor = o.index + o[0].length;
+    } else {
+      depth--;
+      if (depth === 0) return c.index;
+      cursor = c.index + c[0].length;
+    }
+  }
+  return -1;
+}
+
 function renderList(listBody: string, ordered: boolean, depth: number): string {
-  const items: string[] = [];
-  const re = /<li[^>]*>([\s\S]*?)<\/li>/gi;
-  let m: RegExpExecArray | null;
-  let idx = 1;
-
-  while ((m = re.exec(listBody)) !== null) {
-    const itemHtml = m[1];
-    const marker = ordered ? `${idx}.` : "-";
-    idx++;
-
-    const inline = stripBlockTagsForListItem(itemHtml);
+  const items = splitTopLevelListItems(listBody);
+  const lines: string[] = [];
+  items.forEach((itemHtml, idx) => {
+    const marker = ordered ? `${idx + 1}.` : "-";
     const indent = "  ".repeat(depth);
-    items.push(`${indent}${marker} ${inline}`.replace(/\s+$/, ""));
+    const { firstLine, nestedBlocks } = renderListItem(itemHtml, depth);
+    lines.push(`${indent}${marker} ${firstLine}`.replace(/\s+$/, ""));
+    if (nestedBlocks) lines.push(nestedBlocks);
+  });
+  return lines.join("\n");
+}
+
+/**
+ * Split a list body into the contents of its top-level `<li>` elements,
+ * skipping any `<li>` that's nested inside a child `<ul>`/`<ol>`.
+ */
+function splitTopLevelListItems(listBody: string): string[] {
+  const items: string[] = [];
+  let i = 0;
+  while (i < listBody.length) {
+    const open = /<li\b[^>]*>/gi;
+    open.lastIndex = i;
+    const m = open.exec(listBody);
+    if (!m) break;
+    const itemStart = m.index + m[0].length;
+    const itemEnd = findMatchingLiClose(listBody, itemStart);
+    if (itemEnd < 0) break;
+    items.push(listBody.slice(itemStart, itemEnd));
+    i = itemEnd + "</li>".length;
+  }
+  return items;
+}
+
+function findMatchingLiClose(text: string, from: number): number {
+  const open = /<li\b[^>]*>/gi;
+  const close = /<\/li\s*>/gi;
+  let depth = 1;
+  let cursor = from;
+  while (cursor < text.length) {
+    open.lastIndex = cursor;
+    close.lastIndex = cursor;
+    const o = open.exec(text);
+    const c = close.exec(text);
+    if (!c) return -1;
+    if (o && o.index < c.index) {
+      depth++;
+      cursor = o.index + o[0].length;
+    } else {
+      depth--;
+      if (depth === 0) return c.index;
+      cursor = c.index + c[0].length;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Render a single list item: extract the inline portion (first line) and
+ * any nested lists (recursively rendered with deeper indentation).
+ *
+ * Uses the depth-aware list-close finder rather than a non-greedy regex,
+ * so a top-level child `<ul>` containing further nested `<ul>` pairs is
+ * peeled off as a balanced unit instead of stopping at the first
+ * `</ul>`.
+ */
+function renderListItem(
+  itemHtml: string,
+  depth: number
+): { firstLine: string; nestedBlocks: string } {
+  const nestedRendered: string[] = [];
+  let stripped = "";
+  let i = 0;
+  while (i < itemHtml.length) {
+    const open = findNextListOpen(itemHtml, i);
+    if (!open) {
+      stripped += itemHtml.slice(i);
+      break;
+    }
+    stripped += itemHtml.slice(i, open.start);
+    const closeIdx = findMatchingListClose(itemHtml, open.openEnd, open.tag);
+    if (closeIdx < 0) {
+      stripped += itemHtml.slice(open.start);
+      break;
+    }
+    const body = itemHtml.slice(open.openEnd, closeIdx);
+    nestedRendered.push(renderList(body, open.tag === "ol", depth + 1));
+    i = closeIdx + `</${open.tag}>`.length;
   }
 
-  return `\n${items.join("\n")}\n`;
+  const firstLine = stripBlockTagsForListItem(stripped);
+  const nestedBlocks = nestedRendered.filter((s) => s !== "").join("\n");
+  return { firstLine, nestedBlocks };
 }
 
 function stripBlockTagsForListItem(html: string): string {
-  // First-level paragraphs collapse to plain text; nested ul/ol pass through
-  // (already resolved by the outer iteration).
   let text = html.replace(/<\/?p[^>]*>/gi, "");
   text = resolveLinks(text);
   text = resolveInlineMarks(text);
   text = decodeEntities(text);
-  text = text.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  text = stripRemainingTags(text);
   return text.trim();
 }
 
@@ -325,10 +593,8 @@ function resolveBlockquotes(text: string): string {
   return text.replace(
     /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi,
     (_m, body) => {
-      const inner = body
-        .replace(/<\/?p[^>]*>/gi, "\n")
-        .replace(/<\/?[a-zA-Z][^>]*>/g, "")
-        .trim();
+      const stripped = body.replace(/<\/?p[^>]*>/gi, "\n");
+      const inner = stripRemainingTags(stripped).trim();
       return `\n\n${prefixLines(decodeEntities(inner), "> ")}\n\n`;
     }
   );

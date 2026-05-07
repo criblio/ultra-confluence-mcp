@@ -103,14 +103,40 @@ describe("storageXhtmlToMarkdown — lists", () => {
     expect(out).toBe("1. x\n2. y");
   });
 
-  it("converts nested lists with indentation", () => {
+  it("converts nested lists with indentation (one level)", () => {
     const out = trim(
       storageXhtmlToMarkdown(
         "<ul><li>outer<ul><li>inner</li></ul></li></ul>"
       )
     );
-    expect(out).toContain("- outer");
-    expect(out).toContain("inner");
+    expect(out).toBe("- outer\n  - inner");
+  });
+
+  it("preserves bullets across siblings inside a nested list", () => {
+    const out = trim(
+      storageXhtmlToMarkdown(
+        "<ul><li>outer<ul><li>inner1</li><li>inner2</li></ul></li></ul>"
+      )
+    );
+    expect(out).toBe("- outer\n  - inner1\n  - inner2");
+  });
+
+  it("handles 3 levels of nesting without collapsing", () => {
+    const out = trim(
+      storageXhtmlToMarkdown(
+        "<ul><li>A<ul><li>B<ul><li>C</li></ul></li></ul></li></ul>"
+      )
+    );
+    expect(out).toBe("- A\n  - B\n    - C");
+  });
+
+  it("handles mixed ordered/unordered nesting", () => {
+    const out = trim(
+      storageXhtmlToMarkdown(
+        "<ol><li>step<ul><li>note</li></ul></li><li>next</li></ol>"
+      )
+    );
+    expect(out).toBe("1. step\n  - note\n2. next");
   });
 });
 
@@ -199,6 +225,19 @@ describe("storageXhtmlToMarkdown — Confluence macros", () => {
       '<ac:structured-macro ac:name="unsupported-thing"></ac:structured-macro>';
     expect(trim(storageXhtmlToMarkdown(xml))).toBe("[macro: unsupported-thing]");
   });
+
+  it("renders self-closing macros (e.g. toc) as a placeholder rather than dropping them", () => {
+    expect(trim(storageXhtmlToMarkdown('<ac:structured-macro ac:name="toc"/>'))).toBe(
+      "[macro: toc]"
+    );
+    expect(
+      trim(
+        storageXhtmlToMarkdown(
+          '<p>before</p><ac:structured-macro ac:name="page-properties-report"/><p>after</p>'
+        )
+      )
+    ).toContain("[macro: page-properties-report]");
+  });
 });
 
 describe("storageXhtmlToMarkdown — cleanup", () => {
@@ -216,5 +255,61 @@ describe("storageXhtmlToMarkdown — cleanup", () => {
       "<h1>One</h1>\n\n\n\n<p>Two</p>\n\n\n\n<p>Three</p>"
     );
     expect(out).not.toContain("\n\n\n");
+  });
+
+  it("does not corrupt surrounding text when an attribute value contains < or >", () => {
+    expect(trim(storageXhtmlToMarkdown('<p title="<bad>">hello</p>'))).toBe(
+      "hello"
+    );
+    expect(
+      trim(storageXhtmlToMarkdown('<p data-x="a > b">x</p><p>y</p>'))
+    ).toBe("x\n\ny");
+  });
+
+  it("preserves apostrophes in attribute values", () => {
+    expect(trim(storageXhtmlToMarkdown(`<p title="it's fine">hi</p>`))).toBe(
+      "hi"
+    );
+  });
+});
+
+/**
+ * The trim layer also routes Confluence's `view` representation (rendered
+ * HTML, not storage XHTML) through this converter as a last-resort fallback.
+ * Rendered HTML has no `<ac:*>` macro tags but has Confluence-specific div
+ * wrappers, anchor spans, and richer attribute usage. These tests pin down
+ * the current behavior so future readers know the lossy areas.
+ */
+describe("storageXhtmlToMarkdown — view HTML characterization", () => {
+  it("strips heading anchor wrappers and keeps the heading text", () => {
+    const view =
+      '<h2 id="heading-Foo">' +
+      '<span class="aui-icon icon-permalink"></span>Foo</h2>' +
+      "<p>body</p>";
+    const out = trim(storageXhtmlToMarkdown(view));
+    expect(out).toBe("## Foo\n\nbody");
+  });
+
+  it("flattens div wrappers into their inner content", () => {
+    const view =
+      '<div class="confluence-information-macro confluence-information-macro-information">' +
+      '<p>info text</p>' +
+      "</div>";
+    const out = trim(storageXhtmlToMarkdown(view));
+    expect(out).toBe("info text");
+  });
+
+  it("renders rendered images via <img>", () => {
+    const view =
+      '<p><img src="/wiki/download/attachments/1/x.png" data-image-src="/wiki/download/attachments/1/x.png" alt="diagram"/></p>';
+    const out = trim(storageXhtmlToMarkdown(view));
+    expect(out).toBe("![diagram](/wiki/download/attachments/1/x.png)");
+  });
+
+  it("renders <a class='external-link' href> as a markdown link", () => {
+    const view =
+      '<p>see <a class="external-link" href="https://example.com" rel="nofollow">here</a></p>';
+    const out = trim(storageXhtmlToMarkdown(view));
+    expect(out).toBe("see [here](https://example.com)");
   });
 });
