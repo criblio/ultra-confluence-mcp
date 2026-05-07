@@ -95,7 +95,7 @@ export const TOOL_TRIM_MAP: Record<string, TrimKind> = {
   // Search
   confluence_cql_search: "search",
   confluence_search_content: "search",
-  // search_generic_content is heterogeneous — leave as passthrough
+  confluence_search_generic_content: "search",
 
   // Everything else (deletes, label removals, content properties, server info,
   // search_generic_content) falls through to passthrough.
