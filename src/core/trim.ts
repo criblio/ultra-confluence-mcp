@@ -4,12 +4,21 @@
  * API responses, and converts ADF or storage XHTML bodies into compact
  * markdown.
  *
- * Single-page reads get `bodyMarkdown` (truncated past BODY_INLINE_LIMIT
- * with a hint to retry with `full=true`). List reads always drop bodies.
+ * Single-page reads emit `bodyMarkdown` inline when the markdown fits
+ * under BODY_INLINE_LIMIT. When it doesn't, the raw body is written to
+ * the on-disk page cache and the response carries a `bodyPath` ref —
+ * agents call `confluence_render_body` with that path to render the
+ * full body on demand without re-hitting Confluence. List reads always
+ * drop bodies entirely.
  */
 
 import { adfToMarkdown } from "../utils/adf-to-markdown.js";
 import { storageXhtmlToMarkdown } from "../utils/storage-to-markdown.js";
+import {
+  CacheKind,
+  RawBody,
+  writePageBody,
+} from "./page-cache.js";
 import { extractNextCursor } from "./pagination.js";
 import { getTrimKind, TrimKind } from "./trim-registry.js";
 
@@ -27,17 +36,79 @@ export interface ApplyTrimOptions {
   disabled?: boolean;
 }
 
-export function applyTrim(
+export async function applyTrim(
   toolName: string,
   raw: unknown,
   opts: ApplyTrimOptions = {}
-): unknown {
+): Promise<unknown> {
   if (opts.full || opts.disabled) {
     return raw;
   }
 
   const kind = getTrimKind(toolName);
-  return project(kind, raw);
+  const projected = project(kind, raw);
+  await offloadOversizeBodies(projected);
+  return projected;
+}
+
+/**
+ * Walk the projected response and replace any pending body-offload
+ * markers with `bodyPath` references after writing the raw body to the
+ * on-disk page cache. Decoupled from the synchronous projector pass so
+ * `applyTrim` can stay pure aside from this single async finalize step.
+ */
+async function offloadOversizeBodies(value: unknown): Promise<void> {
+  if (!isObject(value)) return;
+
+  const pending = value[OFFLOAD_MARKER];
+  if (isOffloadRequest(pending)) {
+    delete value[OFFLOAD_MARKER];
+    try {
+      const path = await writePageBody(
+        pending.kind,
+        pending.id,
+        pending.version,
+        pending.body
+      );
+      value.bodyPath = path;
+    } catch (err) {
+      // Cache write failure shouldn't block the read — fall back to
+      // an excerpt so the agent at least gets something usable.
+      value.bodyMarkdown = pending.excerpt;
+      value.bodyCacheError =
+        err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // Sub-collections (labels/properties/etc.) and list `results` arrays
+  // shouldn't contain bodies in our current projection, but recurse for
+  // future-proofness.
+  if (Array.isArray((value as Record<string, unknown>).results)) {
+    for (const item of (value as { results: unknown[] }).results) {
+      await offloadOversizeBodies(item);
+    }
+  }
+}
+
+interface OffloadRequest {
+  kind: CacheKind;
+  id: string | number;
+  version: number;
+  body: RawBody;
+  excerpt: string;
+}
+
+const OFFLOAD_MARKER = "__pendingOffload" as const;
+
+function isOffloadRequest(x: unknown): x is OffloadRequest {
+  if (!isObject(x)) return false;
+  return (
+    typeof x.kind === "string" &&
+    (typeof x.id === "string" || typeof x.id === "number") &&
+    typeof x.version === "number" &&
+    isObject(x.body) &&
+    typeof x.body.value === "string"
+  );
 }
 
 function project(kind: TrimKind, raw: unknown): unknown {
@@ -45,15 +116,16 @@ function project(kind: TrimKind, raw: unknown): unknown {
 
   switch (kind) {
     case "page":
+      return projectPage(raw, "pages");
     case "blogPost":
-      return projectPage(raw);
+      return projectPage(raw, "blogposts");
     case "pageList":
     case "blogPostList":
       return projectList(raw, projectPageNoBody);
     case "comment":
       return projectComment(raw);
     case "commentList":
-      return projectList(raw, projectComment);
+      return projectList(raw, (item) => projectComment(item));
     case "search":
       return projectSearch(raw);
     case "attachment":
@@ -159,11 +231,11 @@ function projectPageBase(p: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Single page/blog-post: converts body to markdown with truncation. */
-function projectPage(raw: unknown): unknown {
+/** Single page/blog-post: converts body to markdown with on-disk offload. */
+function projectPage(raw: unknown, kind: CacheKind): unknown {
   if (!isObject(raw)) return raw;
   const out = projectPageBase(raw);
-  attachBodyMarkdown(raw, out);
+  attachBodyMarkdown(raw, out, kind);
   // Optional sub-collections requested via includeLabels/etc — keep their
   // results array but drop the meta/_links wrapper.
   for (const key of ["labels", "properties", "operations", "likes", "versions"] as const) {
@@ -176,22 +248,26 @@ function projectPage(raw: unknown): unknown {
 }
 
 /**
- * Convert `raw.body` (ADF JSON, storage XHTML, or rendered view HTML) into a
- * compact `bodyMarkdown` field on `out`. Truncates past the inline limit.
- * Drops the original body shape entirely.
+ * Convert `raw.body` to markdown and either inline it or queue an
+ * on-disk offload (resolved later by `offloadOversizeBodies`) when it
+ * exceeds `BODY_INLINE_LIMIT`. Drops the original body shape regardless.
  */
 function attachBodyMarkdown(
   raw: Record<string, unknown>,
-  out: Record<string, unknown>
+  out: Record<string, unknown>,
+  kind: CacheKind
 ): void {
   const body = raw.body;
   if (!isObject(body)) return;
 
-  const markdown = bodyToMarkdown(body);
-  if (markdown === undefined) {
+  const rawBody = pickBestRepresentation(body);
+  if (!rawBody) {
     out.bodyAvailable = true;
     return;
   }
+
+  const markdown = renderRawBody(rawBody);
+  out.bodyFullSize = markdown.length;
 
   const limit = getBodyInlineLimit();
   if (markdown.length <= limit) {
@@ -199,45 +275,57 @@ function attachBodyMarkdown(
     return;
   }
 
-  const omitted = markdown.length - limit;
-  out.bodyMarkdown = `${markdown.slice(0, limit)}\n\n[truncated — ${omitted} chars omitted; call again with full=true]`;
-  out.bodyFullSize = markdown.length;
+  // Markdown is too big to inline — queue the raw body for offload.
+  // The async pass in applyTrim() turns this into a `bodyPath` ref.
+  const id = typeof raw.id === "string" || typeof raw.id === "number" ? raw.id : "unknown";
+  const version = readVersionNumber(raw.version);
+  const offload: OffloadRequest = {
+    kind,
+    id,
+    version,
+    body: rawBody,
+    excerpt: `${markdown.slice(0, limit)}\n\n[truncated — call confluence_render_body with bodyPath]`,
+  };
+  out[OFFLOAD_MARKER] = offload;
+}
+
+function readVersionNumber(version: unknown): number {
+  if (isObject(version) && typeof version.number === "number") {
+    return version.number;
+  }
+  return 0;
 }
 
 /**
- * Pick the best body representation and convert to markdown. Preference
- * order: atlas_doc_format → storage → view (HTML stripped as a last
- * resort). Returns undefined if no body can be extracted.
+ * Pick the best body representation as a `{value, representation}`
+ * pair. Preference: atlas_doc_format → storage → view. The raw shape
+ * (rather than rendered markdown) is what gets persisted to the cache,
+ * so the converter can run lazily when the agent calls
+ * `confluence_render_body`.
  */
-function bodyToMarkdown(body: Record<string, unknown>): string | undefined {
-  const adfValue = readBodyValue(body.atlas_doc_format);
-  if (adfValue) {
-    const md = adfToMarkdown(adfValue).trim();
-    if (md) return md;
+function pickBestRepresentation(
+  body: Record<string, unknown>
+): RawBody | undefined {
+  for (const rep of ["atlas_doc_format", "storage", "view"] as const) {
+    const part = body[rep];
+    if (isObject(part) && typeof part.value === "string" && part.value.length > 0) {
+      return { value: part.value, representation: rep };
+    }
   }
-
-  const storageValue = readBodyValue(body.storage);
-  if (storageValue) {
-    const md = storageXhtmlToMarkdown(storageValue).trim();
-    if (md) return md;
-  }
-
-  const viewValue = readBodyValue(body.view);
-  if (viewValue) {
-    // `view` is pre-rendered HTML — the storage converter handles enough of
-    // it to produce a usable approximation.
-    const md = storageXhtmlToMarkdown(viewValue).trim();
-    if (md) return md;
-  }
-
   return undefined;
 }
 
-function readBodyValue(part: unknown): string | undefined {
-  if (!isObject(part)) return undefined;
-  return typeof part.value === "string" && part.value.length > 0
-    ? part.value
-    : undefined;
+/** Render a `{value, representation}` pair to markdown. */
+function renderRawBody(body: RawBody): string {
+  switch (body.representation) {
+    case "atlas_doc_format":
+      return adfToMarkdown(body.value).trim();
+    case "storage":
+    case "view":
+      return storageXhtmlToMarkdown(body.value).trim();
+    default:
+      return storageXhtmlToMarkdown(body.value).trim();
+  }
 }
 
 function projectPageNoBody(p: Record<string, unknown>): unknown {
@@ -261,7 +349,7 @@ function projectComment(raw: unknown): unknown {
   if (version) out.version = version;
   const webui = trimWebuiLink(raw._links);
   if (webui) out._links = { webui };
-  attachBodyMarkdown(raw, out);
+  attachBodyMarkdown(raw, out, "comments");
   return out;
 }
 

@@ -23,6 +23,7 @@ import { contentPropertyTools, handleContentPropertyTool } from "./content-prope
 import { ancestorTools, handleAncestorTool } from "./ancestors.js";
 import { descendantTools, handleDescendantTool } from "./descendants.js";
 import { serverTools, handleServerTool } from "./server.js";
+import { bodyTools, handleBodyTool } from "./body.js";
 
 // Tool type definition
 interface Tool {
@@ -101,6 +102,7 @@ const toolsByCategory: Record<ToolCategory, Tool[]> = {
   ancestor: ancestorTools.map(injectFullArg),
   descendant: descendantTools.map(injectFullArg),
   server: serverTools.map(injectFullArg),
+  body: bodyTools.map(injectFullArg),
 };
 
 // Export all tools as a single array (unfiltered)
@@ -252,6 +254,9 @@ export async function handleTool(
       break;
     case "server":
       raw = await handleServerTool(client, toolName, rest);
+      break;
+    case "body":
+      raw = await handleBodyTool(client, toolName, rest);
       break;
     default:
       throw new Error(`Unknown tool category: ${category}`);

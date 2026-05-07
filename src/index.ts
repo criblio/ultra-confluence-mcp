@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { ConfluenceClient, ConfluenceApiError } from "./auth/confluence-client.js";
 import { getFilteredTools, handleTool } from "./tools/index.js";
+import { prunePageCache } from "./core/page-cache.js";
 import {
   resourceDefinitions,
   resourceTemplates,
@@ -175,6 +176,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
+  // Best-effort prune of stale on-disk page cache entries. Errors are
+  // swallowed inside prunePageCache so a broken cache dir can't block
+  // server startup.
+  await prunePageCache();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Confluence MCP server running on stdio");

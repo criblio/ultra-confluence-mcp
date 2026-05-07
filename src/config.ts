@@ -26,6 +26,7 @@ export const ALL_CATEGORIES = [
   "ancestor",
   "descendant",
   "server",
+  "body",
 ] as const;
 
 export type ToolCategory = (typeof ALL_CATEGORIES)[number];
