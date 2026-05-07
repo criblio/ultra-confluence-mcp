@@ -1,12 +1,29 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { applyTrim } from "../../src/core/trim.js";
 import { extractNextCursor } from "../../src/core/pagination.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(__dirname, "../data/api-fixtures");
+
+let cacheRoot: string;
+
+beforeAll(async () => {
+  cacheRoot = await mkdtemp(join(tmpdir(), "confluence-mcp-trim-"));
+  process.env.CONFLUENCE_BODY_CACHE_DIR = cacheRoot;
+});
+
+afterAll(async () => {
+  delete process.env.CONFLUENCE_BODY_CACHE_DIR;
+  if (cacheRoot) {
+    await rm(cacheRoot, { recursive: true, force: true });
+  }
+});
 
 function loadFixture(name: string): unknown {
   return JSON.parse(readFileSync(resolve(fixturesDir, name), "utf-8"));
@@ -14,6 +31,14 @@ function loadFixture(name: string): unknown {
 
 function size(x: unknown): number {
   return JSON.stringify(x).length;
+}
+
+async function trim(
+  toolName: string,
+  raw: unknown,
+  opts?: { full?: boolean; disabled?: boolean }
+): Promise<Record<string, unknown>> {
+  return (await applyTrim(toolName, raw, opts)) as Record<string, unknown>;
 }
 
 describe("extractNextCursor", () => {
@@ -35,28 +60,35 @@ describe("extractNextCursor", () => {
 });
 
 describe("applyTrim - escape hatches", () => {
-  it("returns raw response when full=true", () => {
+  it("returns raw response when full=true", async () => {
     const raw = loadFixture("getPage.json");
-    const result = applyTrim("confluence_get_page", raw, { full: true });
+    const result = await applyTrim("confluence_get_page", raw, { full: true });
     expect(result).toBe(raw);
   });
 
-  it("returns raw response when disabled=true", () => {
+  it("returns raw response when disabled=true", async () => {
     const raw = loadFixture("getPage.json");
-    const result = applyTrim("confluence_get_page", raw, { disabled: true });
+    const result = await applyTrim("confluence_get_page", raw, {
+      disabled: true,
+    });
     expect(result).toBe(raw);
   });
 
-  it("returns raw response for unmapped tools (passthrough)", () => {
+  it("returns raw response for unmapped tools (passthrough)", async () => {
     const raw = { foo: "bar", _links: { webui: "x" } };
-    const result = applyTrim("confluence_delete_page", raw);
+    const result = await applyTrim("confluence_delete_page", raw);
     expect(result).toBe(raw);
   });
 });
 
 describe("projectPage (confluence_get_page)", () => {
-  const raw = loadFixture("getPage.json");
-  const trimmed = applyTrim("confluence_get_page", raw) as Record<string, unknown>;
+  let raw: unknown;
+  let trimmed: Record<string, unknown>;
+
+  beforeAll(async () => {
+    raw = loadFixture("getPage.json");
+    trimmed = await trim("confluence_get_page", raw);
+  });
 
   it("keeps essential fields", () => {
     expect(trimmed.id).toBe("1234567890");
@@ -103,8 +135,13 @@ describe("projectPage (confluence_get_page)", () => {
 });
 
 describe("projectList (confluence_get_pages)", () => {
-  const raw = loadFixture("getPages.json");
-  const trimmed = applyTrim("confluence_get_pages", raw) as Record<string, unknown>;
+  let raw: unknown;
+  let trimmed: Record<string, unknown>;
+
+  beforeAll(async () => {
+    raw = loadFixture("getPages.json");
+    trimmed = await trim("confluence_get_pages", raw);
+  });
 
   it("returns a results array", () => {
     expect(Array.isArray(trimmed.results)).toBe(true);
@@ -115,6 +152,8 @@ describe("projectList (confluence_get_pages)", () => {
     for (const item of trimmed.results as Record<string, unknown>[]) {
       expect(item.body).toBeUndefined();
       expect(item.bodyAvailable).toBeUndefined();
+      expect(item.bodyMarkdown).toBeUndefined();
+      expect(item.bodyPath).toBeUndefined();
     }
   });
 
@@ -140,8 +179,11 @@ describe("projectList (confluence_get_pages)", () => {
 });
 
 describe("projectSearch (confluence_cql_search)", () => {
-  const raw = loadFixture("cqlSearch.json");
-  const trimmed = applyTrim("confluence_cql_search", raw) as Record<string, unknown>;
+  let trimmed: Record<string, unknown>;
+
+  beforeAll(async () => {
+    trimmed = await trim("confluence_cql_search", loadFixture("cqlSearch.json"));
+  });
 
   it("flattens content.id to top-level id", () => {
     const first = (trimmed.results as Record<string, unknown>[])[0];
@@ -179,8 +221,11 @@ describe("projectSearch (confluence_cql_search)", () => {
 });
 
 describe("projectSpace (confluence_get_space)", () => {
-  const raw = loadFixture("getSpace.json");
-  const trimmed = applyTrim("confluence_get_space", raw) as Record<string, unknown>;
+  let trimmed: Record<string, unknown>;
+
+  beforeAll(async () => {
+    trimmed = await trim("confluence_get_space", loadFixture("getSpace.json"));
+  });
 
   it("keeps essential fields", () => {
     expect(trimmed.id).toBe("98765");
@@ -210,10 +255,11 @@ describe("projectSpace (confluence_get_space)", () => {
 });
 
 describe("projectList for spaces (confluence_get_spaces)", () => {
-  const raw = loadFixture("getSpaces.json");
-  const trimmed = applyTrim("confluence_get_spaces", raw) as Record<string, unknown>;
-
-  it("trims each space and exposes nextCursor", () => {
+  it("trims each space and exposes nextCursor", async () => {
+    const trimmed = await trim(
+      "confluence_get_spaces",
+      loadFixture("getSpaces.json")
+    );
     expect((trimmed.results as unknown[]).length).toBe(2);
     expect(trimmed.nextCursor).toBe("Y3Vyc29yMg==");
     const first = (trimmed.results as Record<string, unknown>[])[0];
@@ -223,11 +269,14 @@ describe("projectList for spaces (confluence_get_spaces)", () => {
 });
 
 describe("projectComment list (confluence_get_page_footer_comments)", () => {
-  const raw = loadFixture("getPageFooterComments.json");
-  const trimmed = applyTrim(
-    "confluence_get_page_footer_comments",
-    raw
-  ) as Record<string, unknown>;
+  let trimmed: Record<string, unknown>;
+
+  beforeAll(async () => {
+    trimmed = await trim(
+      "confluence_get_page_footer_comments",
+      loadFixture("getPageFooterComments.json")
+    );
+  });
 
   it("trims comments and converts the body to markdown", () => {
     const first = (trimmed.results as Record<string, unknown>[])[0];
@@ -243,13 +292,11 @@ describe("projectComment list (confluence_get_page_footer_comments)", () => {
 });
 
 describe("projectAttachment list (confluence_get_page_attachments)", () => {
-  const raw = loadFixture("getPageAttachments.json");
-  const trimmed = applyTrim(
-    "confluence_get_page_attachments",
-    raw
-  ) as Record<string, unknown>;
-
-  it("keeps attachment essentials and drops mediaTypeDescription/_links", () => {
+  it("keeps attachment essentials and drops mediaTypeDescription/_links", async () => {
+    const trimmed = await trim(
+      "confluence_get_page_attachments",
+      loadFixture("getPageAttachments.json")
+    );
     const first = (trimmed.results as Record<string, unknown>[])[0];
     expect(first.id).toBe("att-7001");
     expect(first.mediaType).toBe("image/png");
@@ -263,7 +310,7 @@ describe("projectAttachment list (confluence_get_page_attachments)", () => {
 });
 
 describe("projectPage — body conversion", () => {
-  it("prefers atlas_doc_format over storage when both are present", () => {
+  it("prefers atlas_doc_format over storage when both are present", async () => {
     const raw = {
       id: "1",
       title: "T",
@@ -287,14 +334,11 @@ describe("projectPage — body conversion", () => {
         },
       },
     };
-    const trimmed = applyTrim("confluence_get_page", raw) as Record<
-      string,
-      unknown
-    >;
+    const trimmed = await trim("confluence_get_page", raw);
     expect(trimmed.bodyMarkdown).toBe("from-adf");
   });
 
-  it("falls back to storage XHTML when ADF is missing", () => {
+  it("falls back to storage XHTML when ADF is missing", async () => {
     const raw = {
       id: "1",
       title: "T",
@@ -305,15 +349,12 @@ describe("projectPage — body conversion", () => {
         },
       },
     };
-    const trimmed = applyTrim("confluence_get_page", raw) as Record<
-      string,
-      unknown
-    >;
+    const trimmed = await trim("confluence_get_page", raw);
     expect(trimmed.bodyMarkdown).toContain("# Hello");
     expect(trimmed.bodyMarkdown).toContain("world");
   });
 
-  it("falls back to view HTML when neither ADF nor storage are present", () => {
+  it("falls back to view HTML when neither ADF nor storage are present", async () => {
     const raw = {
       id: "1",
       title: "T",
@@ -324,34 +365,29 @@ describe("projectPage — body conversion", () => {
         },
       },
     };
-    const trimmed = applyTrim("confluence_get_page", raw) as Record<
-      string,
-      unknown
-    >;
+    const trimmed = await trim("confluence_get_page", raw);
     expect(trimmed.bodyMarkdown).toContain("## From View");
   });
 
-  it("emits bodyAvailable=true when body shape exists but is empty", () => {
+  it("emits bodyAvailable=true when body shape exists but is empty", async () => {
     const raw = {
       id: "1",
       title: "T",
       body: { storage: { value: "", representation: "storage" } },
     };
-    const trimmed = applyTrim("confluence_get_page", raw) as Record<
-      string,
-      unknown
-    >;
+    const trimmed = await trim("confluence_get_page", raw);
     expect(trimmed.bodyMarkdown).toBeUndefined();
     expect(trimmed.bodyAvailable).toBe(true);
   });
 
-  it("truncates long bodies past the inline limit and reports bodyFullSize", () => {
+  it("offloads long bodies to disk and returns a bodyPath instead of bodyMarkdown", async () => {
     process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
     try {
       const longText = "x".repeat(500);
       const raw = {
-        id: "1",
+        id: "42",
         title: "T",
+        version: { number: 7 },
         body: {
           storage: {
             value: `<p>${longText}</p>`,
@@ -359,38 +395,116 @@ describe("projectPage — body conversion", () => {
           },
         },
       };
-      const trimmed = applyTrim("confluence_get_page", raw) as Record<
-        string,
-        unknown
-      >;
-      const md = trimmed.bodyMarkdown as string;
-      expect(md.length).toBeLessThan(longText.length);
-      expect(md).toContain("[truncated");
+      const trimmed = await trim("confluence_get_page", raw);
+      expect(trimmed.bodyMarkdown).toBeUndefined();
+      expect(typeof trimmed.bodyPath).toBe("string");
+      expect((trimmed.bodyPath as string).startsWith(cacheRoot)).toBe(true);
+      expect((trimmed.bodyPath as string).endsWith("42-v7.json")).toBe(true);
       expect(typeof trimmed.bodyFullSize).toBe("number");
       expect(trimmed.bodyFullSize as number).toBeGreaterThan(100);
+
+      // The on-disk file should round-trip through readFile to the raw body.
+      const disk = JSON.parse(
+        await readFile(trimmed.bodyPath as string, "utf-8")
+      );
+      expect(disk.representation).toBe("storage");
+      expect((disk.value as string).includes(longText)).toBe(true);
     } finally {
       delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
     }
   });
 
-  it("does not emit bodyMarkdown when body shape is absent", () => {
+  it("does not emit bodyMarkdown when body shape is absent", async () => {
     const raw = { id: "1", title: "T" };
-    const trimmed = applyTrim("confluence_get_page", raw) as Record<
-      string,
-      unknown
-    >;
+    const trimmed = await trim("confluence_get_page", raw);
     expect(trimmed.bodyMarkdown).toBeUndefined();
     expect(trimmed.bodyAvailable).toBeUndefined();
+    expect(trimmed.bodyPath).toBeUndefined();
+  });
+
+  it("does NOT emit bodyFullSize for small inline bodies (preserves the 'is this trimmed?' signal)", async () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      version: { number: 1 },
+      body: {
+        storage: { value: "<p>tiny</p>", representation: "storage" },
+      },
+    };
+    const trimmed = await trim("confluence_get_page", raw);
+    expect(typeof trimmed.bodyMarkdown).toBe("string");
+    expect(trimmed.bodyFullSize).toBeUndefined();
+  });
+
+  it("falls back to bodyMarkdownPartial when version is missing (cache would collide on disk)", async () => {
+    process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
+    try {
+      const longText = "x".repeat(500);
+      const raw = {
+        id: "42",
+        title: "T",
+        // version intentionally absent.
+        body: {
+          storage: {
+            value: `<p>${longText}</p>`,
+            representation: "storage",
+          },
+        },
+      };
+      const trimmed = await trim("confluence_get_page", raw);
+      expect(trimmed.bodyPath).toBeUndefined();
+      expect(trimmed.bodyMarkdown).toBeUndefined();
+      expect(typeof trimmed.bodyMarkdownPartial).toBe("string");
+      expect(typeof trimmed.bodyCacheSkippedReason).toBe("string");
+      expect((trimmed.bodyCacheSkippedReason as string).toLowerCase()).toContain(
+        "version"
+      );
+      // Not an error — skip is intentional, not a failure.
+      expect(trimmed.bodyCacheError).toBeUndefined();
+      expect(typeof trimmed.bodyFullSize).toBe("number");
+    } finally {
+      delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+    }
+  });
+
+  it("falls back to bodyMarkdownPartial when the body is too large for the cache size cap", async () => {
+    process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
+    process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "200";
+    try {
+      const longText = "x".repeat(2000);
+      const raw = {
+        id: "42",
+        title: "T",
+        version: { number: 1 },
+        body: {
+          storage: {
+            value: `<p>${longText}</p>`,
+            representation: "storage",
+          },
+        },
+      };
+      const trimmed = await trim("confluence_get_page", raw);
+      expect(trimmed.bodyPath).toBeUndefined();
+      expect(typeof trimmed.bodyMarkdownPartial).toBe("string");
+      expect((trimmed.bodyCacheSkippedReason as string).toLowerCase()).toContain(
+        "size cap"
+      );
+      // BodyCacheTooLargeError is an expected fallback, not an error.
+      expect(trimmed.bodyCacheError).toBeUndefined();
+    } finally {
+      delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+      delete process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+    }
   });
 });
 
 describe("nullish handling", () => {
-  it("returns null/undefined unchanged", () => {
-    expect(applyTrim("confluence_get_page", null)).toBeNull();
-    expect(applyTrim("confluence_get_page", undefined)).toBeUndefined();
+  it("returns null/undefined unchanged", async () => {
+    expect(await applyTrim("confluence_get_page", null)).toBeNull();
+    expect(await applyTrim("confluence_get_page", undefined)).toBeUndefined();
   });
 
-  it("handles non-object responses (e.g. plain strings) without throwing", () => {
-    expect(applyTrim("confluence_get_page", "weird")).toBe("weird");
+  it("handles non-object responses (e.g. plain strings) without throwing", async () => {
+    expect(await applyTrim("confluence_get_page", "weird")).toBe("weird");
   });
 });

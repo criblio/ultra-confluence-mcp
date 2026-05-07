@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { ConfluenceClient, ConfluenceApiError } from "./auth/confluence-client.js";
 import { getFilteredTools, handleTool } from "./tools/index.js";
+import { prunePageCache } from "./core/page-cache.js";
 import {
   resourceDefinitions,
   resourceTemplates,
@@ -178,6 +179,14 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Confluence MCP server running on stdio");
+
+  // Best-effort prune of stale on-disk page cache entries. Fire-and-
+  // forget so a cold cache with thousands of entries can't delay the
+  // MCP transport from accepting traffic. Errors are logged inside
+  // prunePageCache.
+  void prunePageCache().catch((err) => {
+    console.error("[confluence-mcp] prunePageCache rejected:", err);
+  });
 }
 
 main().catch((error) => {
