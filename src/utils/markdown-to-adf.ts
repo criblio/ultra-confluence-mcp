@@ -113,6 +113,7 @@ export function rewriteMdLinks(
  * - Bold, italic, strikethrough inline formatting
  * - Links and images (images use mediaSingle with external media)
  * - Ordered and unordered lists (including nested)
+ * - GitHub-flavored task lists (`- [ ]` / `- [x]`) → ADF taskList
  * - Code blocks with syntax highlighting (uses ADF codeBlock)
  * - Mermaid diagrams via ```mermaid code blocks (rendered natively by Confluence)
  * - Inline code
@@ -294,6 +295,15 @@ function convertCodeBlock(token: Tokens.Code): AdfNode[] {
 // ─── Lists ───────────────────────────────────────────────────────────────────
 
 function convertList(token: Tokens.List): AdfNode {
+  // GitHub-flavored task list: every item is a checkbox. Render as ADF taskList.
+  if (
+    !token.ordered &&
+    token.items.length > 0 &&
+    token.items.every((i) => i.task)
+  ) {
+    return convertTaskList(token);
+  }
+
   const listType = token.ordered ? "orderedList" : "bulletList";
   const node: AdfNode = {
     type: listType,
@@ -307,10 +317,44 @@ function convertList(token: Tokens.List): AdfNode {
   return node;
 }
 
+function convertTaskList(token: Tokens.List): AdfNode {
+  const listLocalId = randomUUID();
+  return {
+    type: "taskList",
+    attrs: { localId: listLocalId },
+    content: token.items.map((item) => {
+      // Strip the inline `checkbox` token marked emits as the item's first child;
+      // its visual checkbox is provided by the ADF taskItem's `state` attr.
+      const itemTokens = (item.tokens || []).filter(
+        (t) => t.type !== "checkbox"
+      );
+      const inlineNodes: AdfNode[] = [];
+      for (const t of itemTokens) {
+        if (t.type === "text" && (t as Tokens.Text).tokens) {
+          inlineNodes.push(
+            ...convertInlineTokens((t as Tokens.Text).tokens || [])
+          );
+        } else {
+          inlineNodes.push(...convertInlineTokens([t]));
+        }
+      }
+      return {
+        type: "taskItem",
+        attrs: {
+          localId: randomUUID(),
+          state: item.checked ? "DONE" : "TODO",
+        },
+        content: inlineNodes,
+      };
+    }),
+  };
+}
+
 function convertListItem(item: Tokens.ListItem): AdfNode {
   const content: AdfNode[] = [];
 
   for (const token of item.tokens) {
+    if (token.type === "checkbox") continue;
     if (token.type === "text" && (token as Tokens.Text).tokens) {
       // Tight list item — inline content wrapped in a "text" token;
       // wrap in a paragraph for ADF
