@@ -233,6 +233,33 @@ describe("writePageBody — size cap", () => {
     }
   });
 
+  it("counts bytes (not UTF-16 code units) so multibyte content can't sneak past the cap", async () => {
+    // Each emoji is 2 UTF-16 code units (so `String#length` undercounts)
+    // but 4 UTF-8 bytes on disk. With a 200-byte cap, ~40 emoji = 160 raw
+    // bytes plus the {value,representation} JSON envelope (~50 bytes)
+    // sits right around the limit. Use 100 emoji to comfortably exceed
+    // the byte cap while staying under any naive code-unit count.
+    process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "200";
+    try {
+      const emoji = "\u{1F600}".repeat(100);
+      let caught: unknown;
+      try {
+        await writePageBody("pages", 7779, 1, {
+          value: emoji,
+          representation: "storage",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(BodyCacheTooLargeError);
+      // The reported size should reflect actual UTF-8 bytes (~400),
+      // not UTF-16 code units (~200).
+      expect((caught as BodyCacheTooLargeError).bytes).toBeGreaterThan(300);
+    } finally {
+      delete process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES;
+    }
+  });
+
   it("does not cap below the configured threshold", async () => {
     process.env.CONFLUENCE_BODY_CACHE_MAX_BYTES = "10000";
     try {

@@ -115,9 +115,13 @@ export async function writePageBody(
   body: RawBody
 ): Promise<string> {
   const json = JSON.stringify(body);
+  // Use byte length, not String#length — String#length is UTF-16 code
+  // units, which under-counts emoji and many CJK code points by ~2×.
+  // The on-disk file is UTF-8, so the cap should match.
+  const bytes = Buffer.byteLength(json, "utf-8");
   const max = getMaxBytes();
-  if (json.length > max) {
-    throw new BodyCacheTooLargeError(json.length, max);
+  if (bytes > max) {
+    throw new BodyCacheTooLargeError(bytes, max);
   }
 
   const path = buildBodyPath(kind, id, version);
