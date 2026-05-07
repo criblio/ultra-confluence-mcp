@@ -1,14 +1,26 @@
 /**
  * Response projectors for the MCP tool layer. Strips bloated fields
  * (`_links`, `_expandable`, raw `body.*.value`, etc.) from Confluence
- * API responses to keep the MCP context window manageable.
+ * API responses, and converts ADF or storage XHTML bodies into compact
+ * markdown.
  *
- * PR1 scope: drop bodies entirely (lists get nothing; single reads get
- * `bodyAvailable: true`). PR2 will add markdown body conversion.
+ * Single-page reads get `bodyMarkdown` (truncated past BODY_INLINE_LIMIT
+ * with a hint to retry with `full=true`). List reads always drop bodies.
  */
 
+import { adfToMarkdown } from "../utils/adf-to-markdown.js";
+import { storageXhtmlToMarkdown } from "../utils/storage-to-markdown.js";
 import { extractNextCursor } from "./pagination.js";
 import { getTrimKind, TrimKind } from "./trim-registry.js";
+
+const DEFAULT_BODY_INLINE_LIMIT = 4000;
+
+function getBodyInlineLimit(): number {
+  const raw = process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+  if (!raw) return DEFAULT_BODY_INLINE_LIMIT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BODY_INLINE_LIMIT;
+}
 
 export interface ApplyTrimOptions {
   full?: boolean;
@@ -147,13 +159,11 @@ function projectPageBase(p: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Single page/blog-post: includes a placeholder for body presence. */
+/** Single page/blog-post: converts body to markdown with truncation. */
 function projectPage(raw: unknown): unknown {
   if (!isObject(raw)) return raw;
   const out = projectPageBase(raw);
-  if (isObject(raw.body)) {
-    out.bodyAvailable = true;
-  }
+  attachBodyMarkdown(raw, out);
   // Optional sub-collections requested via includeLabels/etc — keep their
   // results array but drop the meta/_links wrapper.
   for (const key of ["labels", "properties", "operations", "likes", "versions"] as const) {
@@ -163,6 +173,71 @@ function projectPage(raw: unknown): unknown {
     }
   }
   return out;
+}
+
+/**
+ * Convert `raw.body` (ADF JSON, storage XHTML, or rendered view HTML) into a
+ * compact `bodyMarkdown` field on `out`. Truncates past the inline limit.
+ * Drops the original body shape entirely.
+ */
+function attachBodyMarkdown(
+  raw: Record<string, unknown>,
+  out: Record<string, unknown>
+): void {
+  const body = raw.body;
+  if (!isObject(body)) return;
+
+  const markdown = bodyToMarkdown(body);
+  if (markdown === undefined) {
+    out.bodyAvailable = true;
+    return;
+  }
+
+  const limit = getBodyInlineLimit();
+  if (markdown.length <= limit) {
+    out.bodyMarkdown = markdown;
+    return;
+  }
+
+  const omitted = markdown.length - limit;
+  out.bodyMarkdown = `${markdown.slice(0, limit)}\n\n[truncated — ${omitted} chars omitted; call again with full=true]`;
+  out.bodyFullSize = markdown.length;
+}
+
+/**
+ * Pick the best body representation and convert to markdown. Preference
+ * order: atlas_doc_format → storage → view (HTML stripped as a last
+ * resort). Returns undefined if no body can be extracted.
+ */
+function bodyToMarkdown(body: Record<string, unknown>): string | undefined {
+  const adfValue = readBodyValue(body.atlas_doc_format);
+  if (adfValue) {
+    const md = adfToMarkdown(adfValue).trim();
+    if (md) return md;
+  }
+
+  const storageValue = readBodyValue(body.storage);
+  if (storageValue) {
+    const md = storageXhtmlToMarkdown(storageValue).trim();
+    if (md) return md;
+  }
+
+  const viewValue = readBodyValue(body.view);
+  if (viewValue) {
+    // `view` is pre-rendered HTML — the storage converter handles enough of
+    // it to produce a usable approximation.
+    const md = storageXhtmlToMarkdown(viewValue).trim();
+    if (md) return md;
+  }
+
+  return undefined;
+}
+
+function readBodyValue(part: unknown): string | undefined {
+  if (!isObject(part)) return undefined;
+  return typeof part.value === "string" && part.value.length > 0
+    ? part.value
+    : undefined;
 }
 
 function projectPageNoBody(p: Record<string, unknown>): unknown {
@@ -186,9 +261,7 @@ function projectComment(raw: unknown): unknown {
   if (version) out.version = version;
   const webui = trimWebuiLink(raw._links);
   if (webui) out._links = { webui };
-  if (isObject(raw.body)) {
-    out.bodyAvailable = true;
-  }
+  attachBodyMarkdown(raw, out);
   return out;
 }
 

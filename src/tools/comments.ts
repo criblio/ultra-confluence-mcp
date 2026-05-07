@@ -240,7 +240,8 @@ const DeleteFooterCommentSchema = z.object({
 export async function handleCommentTool(
   client: ConfluenceClient,
   toolName: string,
-  args: unknown
+  args: unknown,
+  full = false
 ): Promise<unknown> {
   switch (toolName) {
     case "confluence_get_page_footer_comments": {
@@ -248,7 +249,11 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
@@ -263,7 +268,11 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.resolutionStatus)
         queryParams["resolution-status"] = input.resolutionStatus;
       if (input.cursor) queryParams["cursor"] = input.cursor;
@@ -280,7 +289,11 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
@@ -295,7 +308,11 @@ export async function handleCommentTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
 
       return client.get<ConfluenceFooterComment>(
         `/footer-comments/${input.commentId}`,

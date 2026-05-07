@@ -80,9 +80,12 @@ describe("projectPage (confluence_get_page)", () => {
     });
   });
 
-  it("drops body content and replaces with bodyAvailable: true", () => {
+  it("drops the raw body shape and emits bodyMarkdown", () => {
     expect(trimmed.body).toBeUndefined();
-    expect(trimmed.bodyAvailable).toBe(true);
+    expect(typeof trimmed.bodyMarkdown).toBe("string");
+    expect((trimmed.bodyMarkdown as string).startsWith("# Welcome")).toBe(
+      true
+    );
   });
 
   it("drops _expandable", () => {
@@ -226,11 +229,12 @@ describe("projectComment list (confluence_get_page_footer_comments)", () => {
     raw
   ) as Record<string, unknown>;
 
-  it("trims comments and replaces body with bodyAvailable", () => {
+  it("trims comments and converts the body to markdown", () => {
     const first = (trimmed.results as Record<string, unknown>[])[0];
     expect(first.id).toBe("5001");
     expect(first.body).toBeUndefined();
-    expect(first.bodyAvailable).toBe(true);
+    expect(typeof first.bodyMarkdown).toBe("string");
+    expect((first.bodyMarkdown as string).includes("Looks good")).toBe(true);
   });
 
   it("does not include nextCursor when next is null", () => {
@@ -255,6 +259,128 @@ describe("projectAttachment list (confluence_get_page_attachments)", () => {
     );
     expect(first.mediaTypeDescription).toBeUndefined();
     expect(first._links).toBeUndefined();
+  });
+});
+
+describe("projectPage — body conversion", () => {
+  it("prefers atlas_doc_format over storage when both are present", () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      body: {
+        atlas_doc_format: {
+          value: JSON.stringify({
+            type: "doc",
+            version: 1,
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "from-adf" }],
+              },
+            ],
+          }),
+          representation: "atlas_doc_format",
+        },
+        storage: {
+          value: "<p>from-storage</p>",
+          representation: "storage",
+        },
+      },
+    };
+    const trimmed = applyTrim("confluence_get_page", raw) as Record<
+      string,
+      unknown
+    >;
+    expect(trimmed.bodyMarkdown).toBe("from-adf");
+  });
+
+  it("falls back to storage XHTML when ADF is missing", () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      body: {
+        storage: {
+          value: "<h1>Hello</h1><p>world</p>",
+          representation: "storage",
+        },
+      },
+    };
+    const trimmed = applyTrim("confluence_get_page", raw) as Record<
+      string,
+      unknown
+    >;
+    expect(trimmed.bodyMarkdown).toContain("# Hello");
+    expect(trimmed.bodyMarkdown).toContain("world");
+  });
+
+  it("falls back to view HTML when neither ADF nor storage are present", () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      body: {
+        view: {
+          value: "<h2>From View</h2>",
+          representation: "view",
+        },
+      },
+    };
+    const trimmed = applyTrim("confluence_get_page", raw) as Record<
+      string,
+      unknown
+    >;
+    expect(trimmed.bodyMarkdown).toContain("## From View");
+  });
+
+  it("emits bodyAvailable=true when body shape exists but is empty", () => {
+    const raw = {
+      id: "1",
+      title: "T",
+      body: { storage: { value: "", representation: "storage" } },
+    };
+    const trimmed = applyTrim("confluence_get_page", raw) as Record<
+      string,
+      unknown
+    >;
+    expect(trimmed.bodyMarkdown).toBeUndefined();
+    expect(trimmed.bodyAvailable).toBe(true);
+  });
+
+  it("truncates long bodies past the inline limit and reports bodyFullSize", () => {
+    process.env.CONFLUENCE_BODY_INLINE_LIMIT = "100";
+    try {
+      const longText = "x".repeat(500);
+      const raw = {
+        id: "1",
+        title: "T",
+        body: {
+          storage: {
+            value: `<p>${longText}</p>`,
+            representation: "storage",
+          },
+        },
+      };
+      const trimmed = applyTrim("confluence_get_page", raw) as Record<
+        string,
+        unknown
+      >;
+      const md = trimmed.bodyMarkdown as string;
+      expect(md.length).toBeLessThan(longText.length);
+      expect(md).toContain("[truncated");
+      expect(typeof trimmed.bodyFullSize).toBe("number");
+      expect(trimmed.bodyFullSize as number).toBeGreaterThan(100);
+    } finally {
+      delete process.env.CONFLUENCE_BODY_INLINE_LIMIT;
+    }
+  });
+
+  it("does not emit bodyMarkdown when body shape is absent", () => {
+    const raw = { id: "1", title: "T" };
+    const trimmed = applyTrim("confluence_get_page", raw) as Record<
+      string,
+      unknown
+    >;
+    expect(trimmed.bodyMarkdown).toBeUndefined();
+    expect(trimmed.bodyAvailable).toBeUndefined();
   });
 });
 

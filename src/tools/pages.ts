@@ -627,7 +627,8 @@ async function resolveMdLinksInAdf(
 export async function handlePageTool(
   client: ConfluenceClient,
   toolName: string,
-  args: unknown
+  args: unknown,
+  full = false
 ): Promise<unknown> {
   switch (toolName) {
     case "confluence_get_pages": {
@@ -653,7 +654,14 @@ export async function handlePageTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      // Force atlas_doc_format only when we're going to trim the response.
+      // With full=true the caller wants the raw API shape, including
+      // whatever format Confluence would have returned by default.
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.getDraft) queryParams["get-draft"] = input.getDraft;
       if (input.version) queryParams["version"] = input.version;
       if (input.includeLabels) queryParams["include-labels"] = true;
