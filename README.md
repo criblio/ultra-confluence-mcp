@@ -168,6 +168,7 @@ Add to your Claude Desktop configuration file:
 - `confluence_delete_page` - Delete a page
 - `confluence_get_pages_in_space` - Get all pages in a space
 - `confluence_get_pages_for_label` - Get pages with a specific label
+- `confluence_render_body` - Convert a cached page body (ADF/storage on disk) to markdown. Pass `outputPath` to write straight to disk so the rendered body never inflates the agent's context. See [Reading large bodies](#reading-large-bodies-without-context-bloat).
 
 ### Spaces
 
@@ -260,6 +261,31 @@ Add to your Claude Desktop configuration file:
 - `confluence://space/{id}` - Space details
 - `confluence://page/{id}` - Page details
 - `confluence://blogpost/{id}` - Blog post details
+
+## Reading large bodies without context bloat
+
+When a single-page read returns a body too large to inline, the trim layer offloads the raw API response to disk and surfaces a `bodyPath` field on the response. Two ways to use it:
+
+**Inline rendering (default).** Call `confluence_render_body` with just `bodyPath` to get the converted markdown back in the response under `bodyMarkdown`:
+
+```json
+{
+  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json"
+}
+```
+
+**Direct-to-disk rendering** (recommended when the agent already knows where the file should land — e.g. pulling a doc back to a working tree). Add `outputPath` and the rendered output is written there; the response carries only `{ representation, sourceLength, outputPath, bytesWritten }` — the body bytes never traverse the agent's context:
+
+```json
+{
+  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json",
+  "outputPath": "/abs/path/to/page.md"
+}
+```
+
+This is dramatically more context-efficient when restoring multiple pages. Five docs of ~10 KB each cost ~50 KB through inline rendering and effectively 0 through `outputPath`. Parent directories are created if missing; existing files are overwritten.
+
+Both forms work with `format: "raw"` if you want the original ADF JSON / storage XHTML rather than markdown.
 
 ## Body Formats
 
