@@ -34,6 +34,7 @@ import { ConfluenceClient } from "../build/auth/confluence-client.js";
 import { getConfig } from "../build/config.js";
 import { applyTrim } from "../build/core/trim.js";
 import { getFilteredTools } from "../build/tools/index.js";
+import { SKILL_CONTENT } from "../build/cli/install-skill.js";
 
 // Default targets are pages in the author's "Scotts" space (the same
 // space the integration tests use). Override via env when running
@@ -289,6 +290,63 @@ async function main() {
       )} | ${ratio(baseToolBytes, row.bytes)} |`
     );
   }
+
+  // ─── MCP vs CLI overhead ─────────────────────────────────────────────────
+  //
+  // Two ways to call this server from an agent:
+  //   - MCP: the host registers each tool. Schemas live in context for
+  //     the whole conversation. CONFLUENCE_ENABLED_CATEGORIES /
+  //     CONFLUENCE_DISABLED_TOOLS trims that surface (see table above).
+  //   - CLI: the agent shells out to `confluence-cli`. The only
+  //     conversation-level overhead is SKILL.md, which the harness
+  //     loads on demand when the user mentions Confluence. Per call,
+  //     stdout carries the same trimmed JSON the MCP path emits, plus
+  //     one trailing `ref: /path` line (~80–100 bytes).
+  //
+  // The honest comparison: at minimal filtering the two are
+  // comparable; at no filtering the CLI's per-conversation footprint
+  // is much smaller. Per-call cost is a wash (the ref line is noise).
+  // The choice usually comes down to ergonomics, not tokens.
+  header("MCP vs CLI — agent context overhead");
+  const skillBytes = bytes(SKILL_CONTENT);
+  // Synthetic but realistic: one of the largest stdout footers the
+  // CLI emits for a deeply-nested temp path.
+  const refLineBytes = bytes(
+    "ref: /var/folders/xx/yyyyyyyyyy/T/confluence-cli/refs/confluence_get_page-2026-01-01T00-00-00-000Z-abcdef.json\n"
+  );
+  console.log(
+    "Per-conversation overhead: cost the agent pays once, regardless of how many calls it makes."
+  );
+  console.log("");
+  console.log("| path | what loads | bytes | ~tokens |");
+  console.log("|---|---|---:|---:|");
+  console.log(
+    `| MCP, all categories | ${toolListRows[0].tools} tool schemas | ${fmt(
+      toolListRows[0].bytes
+    )} | ${fmt(toolListRows[0].tokens)} |`
+  );
+  console.log(
+    `| MCP, 3 categories | ${toolListRows[1].tools} tool schemas | ${fmt(
+      toolListRows[1].bytes
+    )} | ${fmt(toolListRows[1].tokens)} |`
+  );
+  console.log(
+    `| CLI | SKILL.md (loaded on demand) | ${fmt(skillBytes)} | ${fmt(
+      toks(skillBytes)
+    )} |`
+  );
+  console.log("");
+  console.log(
+    `Per-call overhead: the CLI adds one trailing \`ref:\` line (~${refLineBytes} bytes) ` +
+      `on top of the same trimmed JSON the MCP path returns. Negligible at any reasonable call count.`
+  );
+  console.log("");
+  console.log(
+    "Takeaway: with aggressive filtering the two paths are within a few KB of each other. " +
+      "Without filtering, the CLI's once-per-conversation cost is much smaller than the MCP " +
+      "tool list. Either way, per-call output is the same trimmed shape — the CLI's edge is " +
+      "ergonomic (scriptable, pipeable, no MCP host required), not token-savings."
+  );
 
   // Per-call cost
   const client = new ConfluenceClient(getConfig());

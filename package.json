@@ -4,7 +4,8 @@
   "description": "MCP server for Confluence Cloud - provides AI models with full access to Confluence functionality",
   "type": "module",
   "bin": {
-    "confluence-mcp": "./build/index.js"
+    "confluence-mcp": "./build/index.js",
+    "confluence-cli": "./build/cli/index.js"
   },
   "main": "./build/index.js",
   "files": [

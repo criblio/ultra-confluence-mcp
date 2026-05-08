@@ -20,6 +20,69 @@ npm run build
 node build/index.js
 ```
 
+## Standalone CLI (no MCP server)
+
+A `confluence-cli` binary ships alongside the MCP server. It reads the
+same env vars (`CONFLUENCE_HOST`, `CONFLUENCE_EMAIL`,
+`CONFLUENCE_API_TOKEN`), builds a Confluence client in-process, and
+calls Confluence directly — no MCP host required.
+
+```bash
+export CONFLUENCE_HOST=https://yourcompany.atlassian.net
+export CONFLUENCE_EMAIL=you@example.com
+export CONFLUENCE_API_TOKEN=...
+
+npx -y -p github:scottlepp/confluence-mcp confluence-cli confluence_get_page --pageId=12345
+```
+
+Discovery:
+
+```bash
+confluence-cli --help                       # list every tool
+confluence-cli <tool> --help                # show flags for one tool
+```
+
+Flag forms: `--key=value`, `--key value`, `--key=@/path/to/file` (read
+from file), `--key=-` (read from stdin), repeated `--key=a --key=b` to
+build an array (or comma-separated `--key=a,b`).
+
+On success the CLI prints a trimmed JSON summary to stdout, then a
+final `ref: /tmp/.../...json` line pointing at the full untrimmed
+response on disk — `cat` it when the summary leaves out detail you
+need. Pass `--full=true` to skip trimming and dump the raw response
+inline instead.
+
+### Claude Code skill
+
+To make the CLI discoverable to Claude Code agents in standalone
+sessions, install the bundled skill:
+
+```bash
+npx -y -p github:scottlepp/confluence-mcp confluence-cli install-skill
+```
+
+This writes `~/.claude/skills/confluence/SKILL.md`. Use `--force` to
+overwrite, or `--print` to dump the skill content to stdout without
+writing.
+
+### MCP vs CLI — which should I use?
+
+There's a popular claim that CLIs are categorically more
+context-efficient than MCP. The benchmark in
+[docs/BENCHMARK.md](docs/BENCHMARK.md#mcp-vs-cli--agent-context-overhead)
+disagrees: with aggressive tool filtering
+(`CONFLUENCE_ENABLED_CATEGORIES`), the MCP path's per-conversation
+overhead is within a few KB of the CLI's `SKILL.md`. Per-call output
+is identical in both paths (same trimmed shape from the same `applyTrim`
+projection). Without filtering, the CLI's footprint is ~22× smaller
+than the full MCP tool list — but anyone who's filtering is already in
+the same ballpark.
+
+The CLI's real edge is **ergonomic**: scriptable, pipeable, doesn't
+require an MCP host, runs from any shell. Use whichever fits your
+workflow; on token cost it's mostly a wash for reasonable filter
+configs.
+
 ## Configuration
 
 Set the following environment variables:

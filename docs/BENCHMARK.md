@@ -59,6 +59,46 @@ saves ~31 KB of context per conversation versus the default. Add a few
 `CONFLUENCE_DISABLED_TOOLS` to drop destructive operations and you're
 under 4,000 tokens for the entire tool surface.
 
+## MCP vs CLI — agent context overhead
+
+The repo ships two ways to call Confluence from an agent:
+
+- **MCP**: the host registers each tool. Schemas live in context for
+  the whole conversation. `CONFLUENCE_ENABLED_CATEGORIES` /
+  `CONFLUENCE_DISABLED_TOOLS` trims that surface (see table above).
+- **CLI**: the agent shells out to `confluence-cli`. The only
+  conversation-level overhead is `SKILL.md`, loaded on demand by the
+  Claude Code harness when the user mentions Confluence. Per call,
+  stdout carries the same trimmed JSON the MCP path emits, plus one
+  trailing `ref: /path` line (~110 bytes).
+
+Per-conversation overhead — the cost the agent pays once, regardless
+of how many calls it makes:
+
+| path | what loads | bytes | ~tokens |
+|---|---|---:|---:|
+| MCP, all categories | 63 tool schemas | 51,763 | 12,941 |
+| MCP, 3 categories | 15 tool schemas | 19,545 | 4,886 |
+| CLI | SKILL.md (loaded on demand) | 2,303 | 576 |
+
+Per-call overhead is identical in both paths (the same `applyTrim`
+projection runs server-side either way). The CLI adds ~110 bytes for
+the trailing `ref:` line — negligible at any reasonable call count.
+
+### Is the CLI actually "better"?
+
+The honest answer: **with aggressive filtering, MCP and CLI are within
+a few KB of each other on context cost.** Without filtering, the CLI's
+once-per-conversation footprint is ~22× smaller than the full MCP tool
+list, and ~8× smaller than even a 3-category filtered MCP surface. But
+that comparison only matters if you can't or won't filter — anyone who
+sets `CONFLUENCE_ENABLED_CATEGORIES` is already in the same ballpark.
+
+Per-call output is the same trimmed shape in both paths. The CLI's
+real edge is **ergonomic**: scriptable, pipeable, doesn't require an
+MCP host, works from any shell. Calling it a token-efficiency win over
+a properly-filtered MCP setup overstates the case.
+
 ## Per-call cost — single page reads
 
 Each row is one read of `/pages/{id}` against a real Confluence page.

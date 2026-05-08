@@ -108,8 +108,10 @@ const toolsByCategory: Record<ToolCategory, Tool[]> = {
 // Export all tools as a single array (unfiltered)
 export const allTools: Tool[] = Object.values(toolsByCategory).flat();
 
-// Map of tool names to their categories for routing
-const toolCategories: Record<string, ToolCategory> = {};
+// Map of tool names to their categories. Used internally for routing
+// and exported so the CLI can group tools the same way the MCP server
+// classifies them.
+export const toolCategories: Record<string, ToolCategory> = {};
 
 // Populate tool categories
 for (const [category, tools] of Object.entries(toolsByCategory)) {
@@ -201,6 +203,29 @@ export async function handleTool(
   filterConfig?: ToolFilterConfig,
   trimConfig?: TrimConfig
 ): Promise<unknown> {
+  const { result } = await handleToolWithRaw(
+    client,
+    toolName,
+    args,
+    filterConfig,
+    trimConfig
+  );
+  return result;
+}
+
+/**
+ * Like `handleTool` but also returns the pre-trim raw response. The CLI
+ * uses this to persist the full response to disk and emit a `ref:` line,
+ * keeping the agent's stdout context small while preserving access to
+ * untrimmed detail on demand.
+ */
+export async function handleToolWithRaw(
+  client: ConfluenceClient,
+  toolName: string,
+  args: unknown,
+  filterConfig?: ToolFilterConfig,
+  trimConfig?: TrimConfig
+): Promise<{ result: unknown; raw: unknown; full: boolean }> {
   const category = toolCategories[toolName];
 
   if (!category) {
@@ -263,5 +288,6 @@ export async function handleTool(
   }
 
   const trim = trimConfig ?? getTrimConfig();
-  return applyTrim(toolName, raw, { full, disabled: trim.disabled });
+  const result = await applyTrim(toolName, raw, { full, disabled: trim.disabled });
+  return { result, raw, full };
 }
