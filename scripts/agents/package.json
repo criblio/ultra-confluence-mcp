@@ -21,7 +21,7 @@
     "@ai-sdk/mistral": "^3.0.32",
     "@ai-sdk/openai": "^3.0.63",
     "@ai-sdk/openai-compatible": "^2.0.47",
-    "@ai-sdk/perplexity": "^3.0.31",
+    "@ai-sdk/perplexity": "^3.0.33",
     "@octokit/rest": "^22.0.1",
     "@openrouter/ai-sdk-provider": "^2.9.0",
     "ai": "^6.0.176",
