@@ -1,4 +1,5 @@
 import { readFile } from "fs/promises";
+import { basename } from "path";
 import { z } from "zod";
 import { ConfluenceClient } from "../auth/confluence-client.js";
 import {
@@ -32,6 +33,15 @@ async function resolveMarkdown(
   throw new Error(
     "Either 'markdown' or 'markdownFilePath' must be provided."
   );
+}
+
+/**
+ * Derive a page title from a Markdown file path: basename minus the `.md` extension.
+ * Returns undefined if no file path is given (caller must supply title explicitly).
+ */
+function titleFromPath(markdownFilePath: string | undefined): string | undefined {
+  if (!markdownFilePath) return undefined;
+  return basename(markdownFilePath).replace(/\.md$/i, "");
 }
 
 // Tool definitions for pages
@@ -315,7 +325,8 @@ export const pageTools = [
         },
         title: {
           type: "string",
-          description: "The title of the page",
+          description:
+            "The title of the page. Optional when markdownFilePath is provided — defaults to the file's basename without the .md extension.",
         },
         markdown: {
           type: "string",
@@ -340,7 +351,7 @@ export const pageTools = [
           description: "Page status (default: current)",
         },
       },
-      required: ["spaceId", "title"],
+      required: ["spaceId"],
     },
   },
   {
@@ -412,7 +423,8 @@ export const pageTools = [
         },
         title: {
           type: "string",
-          description: "The title of the page",
+          description:
+            "The title of the page. Optional when markdownFilePath is provided — defaults to the file's basename without the .md extension.",
         },
         markdown: {
           type: "string",
@@ -437,7 +449,7 @@ export const pageTools = [
           description: "Page status (default: current)",
         },
       },
-      required: ["spaceId", "title"],
+      required: ["spaceId"],
     },
   },
   {
@@ -559,7 +571,7 @@ const GetPagesForLabelSchema = z.object({
 const CreatePageFromMarkdownLegacySchema = z
   .object({
     spaceId: z.string(),
-    title: z.string(),
+    title: z.string().optional(),
     markdown: z.string().optional(),
     markdownFilePath: z.string().optional(),
     parentId: z.string().optional(),
@@ -582,7 +594,7 @@ const UpdatePageFromMarkdownLegacySchema = z
 const CreatePageFromMarkdownSchema = z
   .object({
     spaceId: z.string(),
-    title: z.string(),
+    title: z.string().optional(),
     markdown: z.string().optional(),
     markdownFilePath: z.string().optional(),
     parentId: z.string().optional(),
@@ -777,11 +789,17 @@ export async function handlePageTool(
     case "confluence_create_page_from_markdown_legacy": {
       const input = CreatePageFromMarkdownLegacySchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
+      const title = input.title ?? titleFromPath(input.markdownFilePath);
+      if (!title) {
+        throw new Error(
+          "'title' is required when 'markdownFilePath' is not provided."
+        );
+      }
       const storageBody = markdownToStorageFormat(md);
 
       const body: Record<string, unknown> = {
         spaceId: input.spaceId,
-        title: input.title,
+        title,
         body: {
           representation: "storage",
           value: storageBody,
@@ -819,12 +837,18 @@ export async function handlePageTool(
     case "confluence_create_page_from_markdown": {
       const input = CreatePageFromMarkdownSchema.parse(args);
       const md = await resolveMarkdown(input.markdown, input.markdownFilePath);
+      const title = input.title ?? titleFromPath(input.markdownFilePath);
+      if (!title) {
+        throw new Error(
+          "'title' is required when 'markdownFilePath' is not provided."
+        );
+      }
       const adfDoc = markdownToAdf(md);
       await resolveMdLinksInAdf(client, adfDoc, input.spaceId);
 
       const body: Record<string, unknown> = {
         spaceId: input.spaceId,
-        title: input.title,
+        title,
         body: {
           representation: "atlas_doc_format",
           value: JSON.stringify(adfDoc),
