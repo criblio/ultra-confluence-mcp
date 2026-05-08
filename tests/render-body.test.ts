@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writePageBody } from "../src/core/page-cache.js";
@@ -119,5 +119,93 @@ describe("confluence_render_body", () => {
     })) as Record<string, unknown>;
     expect(result.bodyMarkdown).toBe("");
     expect(result.sourceLength).toBe(0);
+  });
+
+  it("writes rendered markdown to outputPath and omits the body from the response", async () => {
+    const adf = {
+      type: "doc",
+      version: 1,
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Hello" }] },
+        { type: "paragraph", content: [{ type: "text", text: "world" }] },
+      ],
+    };
+    const path = await writePageBody("pages", 200, 1, {
+      value: JSON.stringify(adf),
+      representation: "atlas_doc_format",
+    });
+    const outputPath = join(tmpRoot, "out", "page.md");
+    const result = (await handleTool(stubClient, "confluence_render_body", {
+      bodyPath: path,
+      outputPath,
+    })) as Record<string, unknown>;
+
+    // Response carries path + size, not the rendered content.
+    expect(result.outputPath).toBe(outputPath);
+    expect(result.bytesWritten).toBe(Buffer.byteLength("# Hello\n\nworld", "utf-8"));
+    expect(result.bodyMarkdown).toBeUndefined();
+    expect(result.bodyRaw).toBeUndefined();
+    expect(result.representation).toBe("atlas_doc_format");
+    expect(typeof result.sourceLength).toBe("number");
+
+    // File on disk has the rendered markdown verbatim.
+    const written = await readFile(outputPath, "utf-8");
+    expect(written).toBe("# Hello\n\nworld");
+  });
+
+  it("writes raw source to outputPath when format=raw", async () => {
+    const path = await writePageBody("pages", 201, 1, {
+      value: "<p>raw bytes</p>",
+      representation: "storage",
+    });
+    const outputPath = join(tmpRoot, "raw.html");
+    const result = (await handleTool(stubClient, "confluence_render_body", {
+      bodyPath: path,
+      format: "raw",
+      outputPath,
+    })) as Record<string, unknown>;
+
+    expect(result.outputPath).toBe(outputPath);
+    expect(result.bodyMarkdown).toBeUndefined();
+    expect(result.bodyRaw).toBeUndefined();
+    expect(await readFile(outputPath, "utf-8")).toBe("<p>raw bytes</p>");
+  });
+
+  it("creates parent directories on demand and overwrites existing files", async () => {
+    const path = await writePageBody("pages", 202, 1, {
+      value: "<p>v1</p>",
+      representation: "storage",
+    });
+    const outputPath = join(tmpRoot, "deep", "nested", "dir", "out.md");
+
+    await handleTool(stubClient, "confluence_render_body", { bodyPath: path, outputPath });
+    const first = await readFile(outputPath, "utf-8");
+    expect(first).toContain("v1");
+
+    // Overwrite with a new render.
+    const path2 = await writePageBody("pages", 202, 2, {
+      value: "<p>v2</p>",
+      representation: "storage",
+    });
+    await handleTool(stubClient, "confluence_render_body", { bodyPath: path2, outputPath });
+    const second = await readFile(outputPath, "utf-8");
+    expect(second).toContain("v2");
+    expect(second).not.toContain("v1");
+
+    // Still exactly one file.
+    expect((await stat(outputPath)).isFile()).toBe(true);
+  });
+
+  it("rejects relative outputPath", async () => {
+    const path = await writePageBody("pages", 203, 1, {
+      value: "<p>x</p>",
+      representation: "storage",
+    });
+    await expect(
+      handleTool(stubClient, "confluence_render_body", {
+        bodyPath: path,
+        outputPath: "relative/out.md",
+      })
+    ).rejects.toThrow(/outputPath must be absolute/);
   });
 });
