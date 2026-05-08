@@ -1,0 +1,41 @@
+{
+  "id": "1234567890",
+  "status": "current",
+  "title": "Engineering Onboarding",
+  "spaceId": "98765",
+  "parentId": "11111",
+  "parentType": "page",
+  "position": 42,
+  "authorId": "5b10ac8d82e05b22cc7d4ef5",
+  "ownerId": "5b10ac8d82e05b22cc7d4ef5",
+  "lastOwnerId": "5b10ac8d82e05b22cc7d4ef5",
+  "createdAt": "2024-09-12T08:30:00.000Z",
+  "version": {
+    "createdAt": "2025-01-04T14:22:01.000Z",
+    "message": "Updated quickstart link",
+    "number": 17,
+    "minorEdit": false,
+    "authorId": "5b10ac8d82e05b22cc7d4ef5"
+  },
+  "body": {
+    "storage": {
+      "value": "<h1>Welcome</h1><p>This page has a long XHTML body that would normally inflate the response. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>",
+      "representation": "storage"
+    },
+    "atlas_doc_format": {
+      "value": "{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"heading\",\"attrs\":{\"level\":1},\"content\":[{\"type\":\"text\",\"text\":\"Welcome\"}]}]}",
+      "representation": "atlas_doc_format"
+    }
+  },
+  "_links": {
+    "webui": "/spaces/ENG/pages/1234567890/Engineering+Onboarding",
+    "editui": "/pages/resumedraft.action?draftId=1234567890",
+    "tinyui": "/x/AbCdEf",
+    "self": "https://example.atlassian.net/wiki/api/v2/pages/1234567890",
+    "base": "https://example.atlassian.net/wiki"
+  },
+  "_expandable": {
+    "container": "/rest/api/space/ENG",
+    "history": "/rest/api/content/1234567890/history"
+  }
+}

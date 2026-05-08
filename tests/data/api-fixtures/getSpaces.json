@@ -1,0 +1,41 @@
+{
+  "results": [
+    {
+      "id": "98765",
+      "key": "ENG",
+      "name": "Engineering",
+      "type": "global",
+      "status": "current",
+      "homepageId": "1000",
+      "description": {
+        "plain": { "value": "All engineering docs.", "representation": "plain" },
+        "view": { "value": "<p>All engineering docs.</p>", "representation": "view" }
+      },
+      "_links": {
+        "webui": "/spaces/ENG",
+        "self": "https://example.atlassian.net/wiki/api/v2/spaces/98765",
+        "base": "https://example.atlassian.net/wiki"
+      }
+    },
+    {
+      "id": "98766",
+      "key": "PRODUCT",
+      "name": "Product",
+      "type": "global",
+      "status": "current",
+      "homepageId": "2000",
+      "description": {
+        "plain": { "value": "PM and design docs.", "representation": "plain" }
+      },
+      "_links": {
+        "webui": "/spaces/PRODUCT",
+        "self": "https://example.atlassian.net/wiki/api/v2/spaces/98766",
+        "base": "https://example.atlassian.net/wiki"
+      }
+    }
+  ],
+  "_links": {
+    "next": "/wiki/api/v2/spaces?cursor=Y3Vyc29yMg%3D%3D",
+    "base": "https://example.atlassian.net/wiki"
+  }
+}

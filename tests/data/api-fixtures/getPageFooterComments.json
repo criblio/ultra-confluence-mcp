@@ -1,0 +1,31 @@
+{
+  "results": [
+    {
+      "id": "5001",
+      "status": "current",
+      "title": null,
+      "pageId": "1234567890",
+      "version": {
+        "createdAt": "2025-01-04T14:22:01.000Z",
+        "number": 1,
+        "minorEdit": false,
+        "authorId": "5b10ac8d82e05b22cc7d4ef5"
+      },
+      "body": {
+        "storage": {
+          "value": "<p>Looks good to me.</p>",
+          "representation": "storage"
+        }
+      },
+      "_links": {
+        "webui": "/spaces/ENG/pages/1234567890/comments/5001",
+        "self": "https://example.atlassian.net/wiki/api/v2/footer-comments/5001",
+        "base": "https://example.atlassian.net/wiki"
+      }
+    }
+  ],
+  "_links": {
+    "next": null,
+    "base": "https://example.atlassian.net/wiki"
+  }
+}

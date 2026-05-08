@@ -9,9 +9,16 @@ import {
   ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { getConfig, getToolFilterConfig, ToolFilterConfig } from "./config.js";
+import {
+  getConfig,
+  getToolFilterConfig,
+  getTrimConfig,
+  ToolFilterConfig,
+  TrimConfig,
+} from "./config.js";
 import { ConfluenceClient, ConfluenceApiError } from "./auth/confluence-client.js";
 import { getFilteredTools, handleTool } from "./tools/index.js";
+import { prunePageCache } from "./core/page-cache.js";
 import {
   resourceDefinitions,
   resourceTemplates,
@@ -43,9 +50,14 @@ function getClient(): ConfluenceClient {
   return confluenceClient;
 }
 
-// Cache tool filter config at startup
+// Cache tool filter and trim config at startup
 const toolFilterConfig: ToolFilterConfig = getToolFilterConfig();
+const trimConfig: TrimConfig = getTrimConfig();
 const filteredTools = getFilteredTools(toolFilterConfig);
+
+if (trimConfig.disabled) {
+  console.error("Response trimming disabled (CONFLUENCE_DISABLE_TRIM)");
+}
 
 // Log filtering info if any filtering is active
 if (toolFilterConfig.enabledCategories.length > 0) {
@@ -74,7 +86,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     const client = getClient();
-    const result = await handleTool(client, name, args || {}, toolFilterConfig);
+    const result = await handleTool(
+      client,
+      name,
+      args || {},
+      toolFilterConfig,
+      trimConfig
+    );
 
     return {
       content: [
@@ -161,6 +179,14 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Confluence MCP server running on stdio");
+
+  // Best-effort prune of stale on-disk page cache entries. Fire-and-
+  // forget so a cold cache with thousands of entries can't delay the
+  // MCP transport from accepting traffic. Errors are logged inside
+  // prunePageCache.
+  void prunePageCache().catch((err) => {
+    console.error("[confluence-mcp] prunePageCache rejected:", err);
+  });
 }
 
 main().catch((error) => {

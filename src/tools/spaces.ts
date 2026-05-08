@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ConfluenceClient } from "../auth/confluence-client.js";
+import { extractNextCursor } from "../core/pagination.js";
 import {
   ConfluenceSpace,
   ConfluenceSpaceSingle,
@@ -12,7 +13,9 @@ export const spaceTools = [
   {
     name: "confluence_get_spaces",
     description:
-      "Get all spaces. Returns spaces filtered by various parameters. Results are paginated - use the returned cursor to fetch more pages if you don't find what you need.",
+      "Get all spaces. Returns spaces filtered by various parameters. Results are paginated - use the returned cursor to fetch more pages if you don't find what you need. " +
+      "To find a space by name, use `nameContains` (case-insensitive substring match), which auto-pages server-side and returns matching results without forcing the caller to walk every page. " +
+      "For an exact-name lookup, CQL search (`type = \"space\" AND title = \"...\"`) is also fast.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -59,6 +62,16 @@ export const spaceTools = [
           type: "number",
           description: "Maximum number of results (default 25, max 250)",
         },
+        nameContains: {
+          type: "string",
+          description:
+            "Case-insensitive substring filter on space name. Applied client-side; the server does not natively support name search. The handler pages through up to `nameSearchMaxScanned` spaces (default 2000) until enough matches are found. Combine with `type` to narrow the scan.",
+        },
+        nameSearchMaxScanned: {
+          type: "number",
+          description:
+            "Maximum number of spaces to scan when filtering by `nameContains`. Default 2000.",
+        },
       },
       required: [],
     },
@@ -66,13 +79,20 @@ export const spaceTools = [
   {
     name: "confluence_get_space",
     description:
-      "Get a specific space by ID. Returns detailed space information.",
+      "Get a specific space by ID or key. Returns detailed space information. " +
+      "Provide either spaceId (numeric) or spaceKey (e.g. 'ENG' or '~712020...' for personal spaces). " +
+      "When spaceKey is given, it is resolved to a numeric id via /spaces?keys=...",
     inputSchema: {
       type: "object" as const,
       properties: {
         spaceId: {
           type: "number",
-          description: "The ID of the space",
+          description: "The numeric ID of the space. Provide this OR spaceKey.",
+        },
+        spaceKey: {
+          type: "string",
+          description:
+            "The space key (e.g. 'ENG', or '~712020...' for personal spaces). Provide this OR spaceId.",
         },
         descriptionFormat: {
           type: "string",
@@ -92,7 +112,7 @@ export const spaceTools = [
           description: "Include permitted operations in the response",
         },
       },
-      required: ["spaceId"],
+      required: [],
     },
   },
   {
@@ -169,7 +189,7 @@ export const spaceTools = [
 
 // Input schemas for validation
 const GetSpacesSchema = z.object({
-  ids: z.array(z.number()).optional(),
+  ids: z.array(z.coerce.number()).optional(),
   keys: z.array(z.string()).optional(),
   type: z.enum(["global", "personal"]).optional(),
   status: z.enum(["current", "archived"]).optional(),
@@ -177,16 +197,23 @@ const GetSpacesSchema = z.object({
   sort: z.enum(["id", "-id", "key", "-key", "name", "-name"]).optional(),
   descriptionFormat: z.enum(["plain", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
+  nameContains: z.string().optional(),
+  nameSearchMaxScanned: z.coerce.number().optional(),
 });
 
-const GetSpaceSchema = z.object({
-  spaceId: z.number(),
-  descriptionFormat: z.enum(["plain", "view"]).optional(),
-  includeLabels: z.boolean().optional(),
-  includeProperties: z.boolean().optional(),
-  includeOperations: z.boolean().optional(),
-});
+const GetSpaceSchema = z
+  .object({
+    spaceId: z.coerce.number().optional(),
+    spaceKey: z.string().optional(),
+    descriptionFormat: z.enum(["plain", "view"]).optional(),
+    includeLabels: z.boolean().optional(),
+    includeProperties: z.boolean().optional(),
+    includeOperations: z.boolean().optional(),
+  })
+  .refine((v) => v.spaceId !== undefined || v.spaceKey !== undefined, {
+    message: "Either 'spaceId' or 'spaceKey' must be provided.",
+  });
 
 const CreateSpaceSchema = z.object({
   name: z.string(),
@@ -196,14 +223,14 @@ const CreateSpaceSchema = z.object({
 });
 
 const UpdateSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   name: z.string().optional(),
   description: z.string().optional(),
   status: z.enum(["current", "archived"]).optional(),
 });
 
 const DeleteSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
 });
 
 // Tool handlers
@@ -229,6 +256,55 @@ export async function handleSpaceTool(
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
+      if (input.nameContains) {
+        const needle = input.nameContains.toLowerCase();
+        const wanted = input.limit ?? 25;
+        const maxScanned = input.nameSearchMaxScanned ?? 2000;
+        const matches: ConfluenceSpace[] = [];
+        let scanned = 0;
+        let cursor = input.cursor;
+        const pageSize = 250;
+        const pageParams: Record<
+          string,
+          string | number | boolean | undefined
+        > = { ...queryParams, limit: pageSize };
+
+        while (scanned < maxScanned && matches.length < wanted) {
+          if (cursor) pageParams["cursor"] = cursor;
+          else delete pageParams["cursor"];
+          const page = await client.get<MultiEntityResult<ConfluenceSpace>>(
+            "/spaces",
+            pageParams
+          );
+          const results = page.results ?? [];
+          scanned += results.length;
+          for (const s of results) {
+            if (s.name?.toLowerCase().includes(needle)) {
+              matches.push(s);
+              if (matches.length >= wanted) break;
+            }
+          }
+          const next = extractNextCursor(page._links?.next);
+          if (!next || results.length === 0) {
+            cursor = undefined;
+            break;
+          }
+          cursor = next;
+        }
+
+        return {
+          results: matches,
+          _links: {},
+          nameSearch: {
+            needle: input.nameContains,
+            scanned,
+            matched: matches.length,
+            truncated: scanned >= maxScanned && matches.length < wanted,
+            nextCursor: cursor,
+          },
+        };
+      }
+
       return client.get<MultiEntityResult<ConfluenceSpace>>(
         "/spaces",
         queryParams
@@ -246,8 +322,23 @@ export async function handleSpaceTool(
       if (input.includeProperties) queryParams["include-properties"] = true;
       if (input.includeOperations) queryParams["include-operations"] = true;
 
+      let spaceId = input.spaceId;
+      if (spaceId === undefined && input.spaceKey) {
+        const lookup = await client.get<MultiEntityResult<ConfluenceSpace>>(
+          "/spaces",
+          { keys: input.spaceKey, limit: 1 }
+        );
+        const match = lookup.results?.[0];
+        if (!match) {
+          throw new Error(
+            `No space found with key '${input.spaceKey}'.`
+          );
+        }
+        spaceId = Number(match.id);
+      }
+
       return client.get<ConfluenceSpaceSingle>(
-        `/spaces/${input.spaceId}`,
+        `/spaces/${spaceId}`,
         queryParams
       );
     }

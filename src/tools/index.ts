@@ -1,9 +1,13 @@
 import { ConfluenceClient } from "../auth/confluence-client.js";
 import {
   getToolFilterConfig,
+  getTrimConfig,
   ToolCategory,
   ToolFilterConfig,
+  TrimConfig,
 } from "../config.js";
+import { applyTrim } from "../core/trim.js";
+import { getTrimKind } from "../core/trim-registry.js";
 
 // Import all tool definitions and handlers
 import { pageTools, handlePageTool } from "./pages.js";
@@ -19,6 +23,7 @@ import { contentPropertyTools, handleContentPropertyTool } from "./content-prope
 import { ancestorTools, handleAncestorTool } from "./ancestors.js";
 import { descendantTools, handleDescendantTool } from "./descendants.js";
 import { serverTools, handleServerTool } from "./server.js";
+import { bodyTools, handleBodyTool } from "./body.js";
 
 // Tool type definition
 interface Tool {
@@ -27,28 +32,86 @@ interface Tool {
   inputSchema: unknown;
 }
 
-// Map category names to their tools
+interface ObjectSchema {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [k: string]: unknown;
+}
+
+const FULL_ARG_DESCRIPTION =
+  "If true, bypass response trimming and return the raw Confluence API response.";
+
+const FULL_HINT_SENTENCE =
+  "Output is trimmed by default (drops _links, _expandable, body content, etc.); pass full=true to receive the raw Confluence response.";
+
+/**
+ * Inject the `full` escape-hatch arg into the inputSchema of every tool
+ * whose response is trimmed, and append a hint to its description so
+ * agents discover the arg without inspecting the schema. Done centrally
+ * so per-file tool definitions don't have to repeat the boilerplate, and
+ * new tools pick it up the moment they're added to TOOL_TRIM_MAP.
+ */
+function injectFullArg(tool: Tool): Tool {
+  if (getTrimKind(tool.name) === "passthrough") return tool;
+
+  const schema = tool.inputSchema;
+  if (
+    typeof schema !== "object" ||
+    schema === null ||
+    (schema as ObjectSchema).type !== "object"
+  ) {
+    return tool;
+  }
+
+  const objSchema = schema as ObjectSchema;
+  const properties = objSchema.properties ?? {};
+  const alreadyInjected = "full" in properties;
+
+  const description = tool.description.includes("full=true")
+    ? tool.description
+    : `${tool.description.replace(/\s*$/, "")} ${FULL_HINT_SENTENCE}`;
+
+  return {
+    ...tool,
+    description,
+    inputSchema: alreadyInjected
+      ? objSchema
+      : {
+          ...objSchema,
+          properties: {
+            ...properties,
+            full: { type: "boolean", description: FULL_ARG_DESCRIPTION },
+          },
+        },
+  };
+}
+
+// Map category names to their tools (with `full` arg injected on read tools)
 const toolsByCategory: Record<ToolCategory, Tool[]> = {
-  page: pageTools,
-  space: spaceTools,
-  blogPost: blogPostTools,
-  comment: commentTools,
-  attachment: attachmentTools,
-  label: labelTools,
-  search: searchTools,
-  user: userTools,
-  version: versionTools,
-  contentProperty: contentPropertyTools,
-  ancestor: ancestorTools,
-  descendant: descendantTools,
-  server: serverTools,
+  page: pageTools.map(injectFullArg),
+  space: spaceTools.map(injectFullArg),
+  blogPost: blogPostTools.map(injectFullArg),
+  comment: commentTools.map(injectFullArg),
+  attachment: attachmentTools.map(injectFullArg),
+  label: labelTools.map(injectFullArg),
+  search: searchTools.map(injectFullArg),
+  user: userTools.map(injectFullArg),
+  version: versionTools.map(injectFullArg),
+  contentProperty: contentPropertyTools.map(injectFullArg),
+  ancestor: ancestorTools.map(injectFullArg),
+  descendant: descendantTools.map(injectFullArg),
+  server: serverTools.map(injectFullArg),
+  body: bodyTools.map(injectFullArg),
 };
 
 // Export all tools as a single array (unfiltered)
 export const allTools: Tool[] = Object.values(toolsByCategory).flat();
 
-// Map of tool names to their categories for routing
-const toolCategories: Record<string, ToolCategory> = {};
+// Map of tool names to their categories. Used internally for routing
+// and exported so the CLI can group tools the same way the MCP server
+// classifies them.
+export const toolCategories: Record<string, ToolCategory> = {};
 
 // Populate tool categories
 for (const [category, tools] of Object.entries(toolsByCategory)) {
@@ -112,13 +175,57 @@ export function isToolEnabled(
   return true;
 }
 
+/**
+ * Strip the `full` escape-hatch arg before handing args to category
+ * handlers — it's a trim-layer concern, not a Confluence-API param.
+ */
+function extractFullFlag(args: unknown): { full: boolean; rest: unknown } {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return { full: false, rest: args };
+  }
+  const obj = args as Record<string, unknown>;
+  const full = obj.full === true;
+  if (!("full" in obj)) {
+    return { full: false, rest: args };
+  }
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k !== "full") rest[k] = v;
+  }
+  return { full, rest };
+}
+
 // Main tool handler that routes to the appropriate category handler
 export async function handleTool(
   client: ConfluenceClient,
   toolName: string,
   args: unknown,
-  filterConfig?: ToolFilterConfig
+  filterConfig?: ToolFilterConfig,
+  trimConfig?: TrimConfig
 ): Promise<unknown> {
+  const { result } = await handleToolWithRaw(
+    client,
+    toolName,
+    args,
+    filterConfig,
+    trimConfig
+  );
+  return result;
+}
+
+/**
+ * Like `handleTool` but also returns the pre-trim raw response. The CLI
+ * uses this to persist the full response to disk and emit a `ref:` line,
+ * keeping the agent's stdout context small while preserving access to
+ * untrimmed detail on demand.
+ */
+export async function handleToolWithRaw(
+  client: ConfluenceClient,
+  toolName: string,
+  args: unknown,
+  filterConfig?: ToolFilterConfig,
+  trimConfig?: TrimConfig
+): Promise<{ result: unknown; raw: unknown; full: boolean }> {
   const category = toolCategories[toolName];
 
   if (!category) {
@@ -130,34 +237,57 @@ export async function handleTool(
     throw new Error(`Tool "${toolName}" is disabled`);
   }
 
+  const { full, rest } = extractFullFlag(args);
+
+  let raw: unknown;
   switch (category) {
     case "page":
-      return handlePageTool(client, toolName, args);
+      raw = await handlePageTool(client, toolName, rest, full);
+      break;
     case "space":
-      return handleSpaceTool(client, toolName, args);
+      raw = await handleSpaceTool(client, toolName, rest);
+      break;
     case "blogPost":
-      return handleBlogPostTool(client, toolName, args);
+      raw = await handleBlogPostTool(client, toolName, rest, full);
+      break;
     case "comment":
-      return handleCommentTool(client, toolName, args);
+      raw = await handleCommentTool(client, toolName, rest, full);
+      break;
     case "attachment":
-      return handleAttachmentTool(client, toolName, args);
+      raw = await handleAttachmentTool(client, toolName, rest);
+      break;
     case "label":
-      return handleLabelTool(client, toolName, args);
+      raw = await handleLabelTool(client, toolName, rest);
+      break;
     case "search":
-      return handleSearchTool(client, toolName, args);
+      raw = await handleSearchTool(client, toolName, rest);
+      break;
     case "user":
-      return handleUserTool(client, toolName, args);
+      raw = await handleUserTool(client, toolName, rest);
+      break;
     case "version":
-      return handleVersionTool(client, toolName, args);
+      raw = await handleVersionTool(client, toolName, rest);
+      break;
     case "contentProperty":
-      return handleContentPropertyTool(client, toolName, args);
+      raw = await handleContentPropertyTool(client, toolName, rest);
+      break;
     case "ancestor":
-      return handleAncestorTool(client, toolName, args);
+      raw = await handleAncestorTool(client, toolName, rest);
+      break;
     case "descendant":
-      return handleDescendantTool(client, toolName, args);
+      raw = await handleDescendantTool(client, toolName, rest);
+      break;
     case "server":
-      return handleServerTool(client, toolName, args);
+      raw = await handleServerTool(client, toolName, rest);
+      break;
+    case "body":
+      raw = await handleBodyTool(client, toolName, rest);
+      break;
     default:
       throw new Error(`Unknown tool category: ${category}`);
   }
+
+  const trim = trimConfig ?? getTrimConfig();
+  const result = await applyTrim(toolName, raw, { full, disabled: trim.disabled });
+  return { result, raw, full };
 }

@@ -120,33 +120,33 @@ export const contentPropertyTools = [
 
 // Input schemas for validation
 const GetPagePropertiesSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPagePropertySchema = z.object({
-  pageId: z.number(),
-  propertyId: z.number(),
+  pageId: z.coerce.number(),
+  propertyId: z.coerce.number(),
 });
 
 const CreatePagePropertySchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   key: z.string(),
   value: z.unknown(),
 });
 
 const UpdatePagePropertySchema = z.object({
-  pageId: z.number(),
-  propertyId: z.number(),
+  pageId: z.coerce.number(),
+  propertyId: z.coerce.number(),
   key: z.string(),
   value: z.unknown(),
-  version: z.number(),
+  version: z.coerce.number(),
 });
 
 const DeletePagePropertySchema = z.object({
-  pageId: z.number(),
-  propertyId: z.number(),
+  pageId: z.coerce.number(),
+  propertyId: z.coerce.number(),
 });
 
 // Tool handlers

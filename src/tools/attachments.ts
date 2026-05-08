@@ -105,24 +105,24 @@ export const attachmentTools = [
 
 // Input schemas for validation
 const GetPageAttachmentsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   mediaType: z.string().optional(),
   filename: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetBlogPostAttachmentsSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   mediaType: z.string().optional(),
   filename: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetAttachmentSchema = z.object({
   attachmentId: z.string(),
-  version: z.number().optional(),
+  version: z.coerce.number().optional(),
 });
 
 const DeleteAttachmentSchema = z.object({

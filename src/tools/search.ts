@@ -60,7 +60,9 @@ export const searchTools = [
   {
     name: "confluence_search_generic_content",
     description:
-      "Search for generic content types: databases, whiteboards, folders, or embeds. NOT for pages or blog posts - use confluence_cql_search or confluence_search_content for those. Results are paginated - use the returned cursor to fetch more pages if needed.",
+      "Search for generic content types: databases, whiteboards, folders, or embeds. " +
+      "NOT for pages or blog posts — use confluence_cql_search or confluence_search_content for those. " +
+      "Results are paginated — use the returned cursor to fetch more pages if needed.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -70,9 +72,10 @@ export const searchTools = [
           description:
             "The type of generic content to search for. Must be one of: DATABASES, WHITEBOARDS, FOLDERS, EMBEDS",
         },
-        spaceId: {
+        spaceKey: {
           type: "string",
-          description: "Filter by space ID",
+          description:
+            "Filter by space *key* (e.g. 'ENG'), not the numeric space id. CQL's `space=` operator works on keys.",
         },
         title: {
           type: "string",
@@ -96,23 +99,33 @@ export const searchTools = [
 const CqlSearchSchema = z.object({
   cql: z.string(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const SearchContentSchema = z.object({
   query: z.string(),
   spaceKey: z.string().optional(),
   type: z.enum(["page", "blogpost", "attachment"]).optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const SearchGenericContentSchema = z.object({
   type: z.enum(["DATABASES", "WHITEBOARDS", "FOLDERS", "EMBEDS"]),
-  spaceId: z.string().optional(),
+  spaceKey: z.string().optional(),
   title: z.string().optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
+
+const GENERIC_CONTENT_CQL_TYPE: Record<
+  z.infer<typeof SearchGenericContentSchema>["type"],
+  string
+> = {
+  DATABASES: "database",
+  WHITEBOARDS: "whiteboard",
+  FOLDERS: "folder",
+  EMBEDS: "embed",
+};
 
 // Tool handlers
 export async function handleSearchTool(
@@ -167,17 +180,27 @@ export async function handleSearchTool(
 
     case "confluence_search_generic_content": {
       const input = SearchGenericContentSchema.parse(args);
+      // Confluence's v2 API has no list/search endpoint for generic
+      // content types — `/{folders,databases,whiteboards,embeds}` are
+      // POST-only (create), and there is no `/wiki/api/v2/search`.
+      // Route through v1 CQL search instead, which DOES expose these
+      // types via `type=folder` etc. and shares its response shape
+      // with `confluence_cql_search`.
+      const cqlParts: string[] = [
+        `type=${GENERIC_CONTENT_CQL_TYPE[input.type]}`,
+      ];
+      if (input.spaceKey) {
+        cqlParts.push(`space="${input.spaceKey.replace(/"/g, '\\"')}"`);
+      }
+      if (input.title) {
+        cqlParts.push(`title~"${input.title.replace(/"/g, '\\"')}"`);
+      }
       const queryParams: Record<string, string | number | boolean | undefined> =
-        {};
-
-      queryParams["type"] = input.type;
-      if (input.spaceId) queryParams["space-id"] = input.spaceId;
-      if (input.title) queryParams["title"] = input.title;
+        { cql: cqlParts.join(" AND ") };
       if (input.cursor) queryParams["cursor"] = input.cursor;
       if (input.limit) queryParams["limit"] = input.limit;
 
-      // Generic content search uses v2 API /search endpoint
-      return client.get<unknown>("/search", queryParams);
+      return client.getV1<ConfluenceSearchResult>("/search", queryParams);
     }
 
     default:

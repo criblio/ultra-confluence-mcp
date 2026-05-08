@@ -197,6 +197,52 @@ describe("markdownToAdf", () => {
     });
   });
 
+  describe("task lists", () => {
+    it("should convert GFM task lists to ADF taskList", () => {
+      const doc = adf(
+        "- [ ] todo one\n- [x] done one\n- [ ] todo two\n- [x] done two"
+      );
+      const list = doc.content[0];
+      expect(list.type).toBe("taskList");
+      expect(typeof list.attrs?.localId).toBe("string");
+      expect(list.content).toHaveLength(4);
+
+      const states = list.content?.map((i) => i.attrs?.state);
+      expect(states).toEqual(["TODO", "DONE", "TODO", "DONE"]);
+
+      // Each taskItem has its own localId and inline text content
+      for (const item of list.content ?? []) {
+        expect(item.type).toBe("taskItem");
+        expect(typeof item.attrs?.localId).toBe("string");
+      }
+      expect(list.content?.[0].content?.[0].text).toBe("todo one");
+      expect(list.content?.[1].content?.[0].text).toBe("done one");
+    });
+
+    it("should preserve inline marks inside task items", () => {
+      const doc = adf("- [x] **bold** task with `code`");
+      const list = doc.content[0];
+      expect(list.type).toBe("taskList");
+      const item = list.content?.[0];
+      expect(item?.attrs?.state).toBe("DONE");
+      const inline = item?.content ?? [];
+      expect(inline[0]?.text).toBe("bold");
+      expect(inline[0]?.marks).toEqual([{ type: "strong" }]);
+      expect(inline[2]?.text).toBe("code");
+      expect(inline[2]?.marks).toEqual([{ type: "code" }]);
+    });
+
+    it("should fall back to bulletList when items mix task and non-task", () => {
+      const doc = adf("- [ ] checkbox item\n- plain item");
+      const list = doc.content[0];
+      expect(list.type).toBe("bulletList");
+      // Stray checkbox tokens should not produce empty children
+      expect(list.content).toHaveLength(2);
+      const firstText = list.content?.[0].content?.[0].content?.[0].text;
+      expect(firstText).toBe("checkbox item");
+    });
+  });
+
   describe("code blocks", () => {
     it("should convert code blocks to codeBlock nodes", () => {
       const doc = adf('```javascript\nconsole.log("hello");\n```');

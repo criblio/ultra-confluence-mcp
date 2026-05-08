@@ -99,27 +99,27 @@ export const versionTools = [
 
 // Input schemas for validation
 const GetPageVersionsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPageVersionSchema = z.object({
-  pageId: z.number(),
-  versionNumber: z.number(),
+  pageId: z.coerce.number(),
+  versionNumber: z.coerce.number(),
 });
 
 const GetBlogPostVersionsSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetBlogPostVersionSchema = z.object({
-  blogPostId: z.number(),
-  versionNumber: z.number(),
+  blogPostId: z.coerce.number(),
+  versionNumber: z.coerce.number(),
 });
 
 // Tool handlers

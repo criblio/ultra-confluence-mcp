@@ -54,15 +54,15 @@ export const descendantTools = [
 
 // Input schemas for validation
 const GetPageDescendantsSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetPageChildrenSchema = z.object({
-  pageId: z.number(),
+  pageId: z.coerce.number(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 // Tool handlers

@@ -20,6 +20,69 @@ npm run build
 node build/index.js
 ```
 
+## Standalone CLI (no MCP server)
+
+A `confluence-cli` binary ships alongside the MCP server. It reads the
+same env vars (`CONFLUENCE_HOST`, `CONFLUENCE_EMAIL`,
+`CONFLUENCE_API_TOKEN`), builds a Confluence client in-process, and
+calls Confluence directly — no MCP host required.
+
+```bash
+export CONFLUENCE_HOST=https://yourcompany.atlassian.net
+export CONFLUENCE_EMAIL=you@example.com
+export CONFLUENCE_API_TOKEN=...
+
+npx -y -p github:scottlepp/confluence-mcp confluence-cli confluence_get_page --pageId=12345
+```
+
+Discovery:
+
+```bash
+confluence-cli --help                       # list every tool
+confluence-cli <tool> --help                # show flags for one tool
+```
+
+Flag forms: `--key=value`, `--key value`, `--key=@/path/to/file` (read
+from file), `--key=-` (read from stdin), repeated `--key=a --key=b` to
+build an array (or comma-separated `--key=a,b`).
+
+On success the CLI prints a trimmed JSON summary to stdout, then a
+final `ref: /tmp/.../...json` line pointing at the full untrimmed
+response on disk — `cat` it when the summary leaves out detail you
+need. Pass `--full=true` to skip trimming and dump the raw response
+inline instead.
+
+### Claude Code skill
+
+To make the CLI discoverable to Claude Code agents in standalone
+sessions, install the bundled skill:
+
+```bash
+npx -y -p github:scottlepp/confluence-mcp confluence-cli install-skill
+```
+
+This writes `~/.claude/skills/confluence/SKILL.md`. Use `--force` to
+overwrite, or `--print` to dump the skill content to stdout without
+writing.
+
+### MCP vs CLI — which should I use?
+
+There's a popular claim that CLIs are categorically more
+context-efficient than MCP. The benchmark in
+[docs/BENCHMARK.md](docs/BENCHMARK.md#mcp-vs-cli--agent-context-overhead)
+disagrees: with aggressive tool filtering
+(`CONFLUENCE_ENABLED_CATEGORIES`), the MCP path's per-conversation
+overhead is within a few KB of the CLI's `SKILL.md`. Per-call output
+is identical in both paths (same trimmed shape from the same `applyTrim`
+projection). Without filtering, the CLI's footprint is ~22× smaller
+than the full MCP tool list — but anyone who's filtering is already in
+the same ballpark.
+
+The CLI's real edge is **ergonomic**: scriptable, pipeable, doesn't
+require an MCP host, runs from any shell. Use whichever fits your
+workflow; on token cost it's mostly a wash for reasonable filter
+configs.
+
 ## Configuration
 
 Set the following environment variables:
@@ -105,6 +168,7 @@ Add to your Claude Desktop configuration file:
 - `confluence_delete_page` - Delete a page
 - `confluence_get_pages_in_space` - Get all pages in a space
 - `confluence_get_pages_for_label` - Get pages with a specific label
+- `confluence_render_body` - Convert a cached page body (ADF/storage on disk) to markdown. Pass `outputPath` to write straight to disk so the rendered body never inflates the agent's context. See [Reading large bodies](#reading-large-bodies-without-context-bloat).
 
 ### Spaces
 
@@ -197,6 +261,31 @@ Add to your Claude Desktop configuration file:
 - `confluence://space/{id}` - Space details
 - `confluence://page/{id}` - Page details
 - `confluence://blogpost/{id}` - Blog post details
+
+## Reading large bodies without context bloat
+
+When a single-page read returns a body too large to inline, the trim layer offloads the raw API response to disk and surfaces a `bodyPath` field on the response. Two ways to use it:
+
+**Inline rendering (default).** Call `confluence_render_body` with just `bodyPath` to get the converted markdown back in the response under `bodyMarkdown`:
+
+```json
+{
+  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json"
+}
+```
+
+**Direct-to-disk rendering** (recommended when the agent already knows where the file should land — e.g. pulling a doc back to a working tree). Add `outputPath` and the rendered output is written there; the response carries only `{ representation, sourceLength, outputPath, bytesWritten }` — the body bytes never traverse the agent's context:
+
+```json
+{
+  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json",
+  "outputPath": "/abs/path/to/page.md"
+}
+```
+
+This is dramatically more context-efficient when restoring multiple pages. Five docs of ~10 KB each cost ~50 KB through inline rendering and effectively 0 through `outputPath`. Parent directories are created if missing; existing files are overwritten.
+
+Both forms work with `format: "raw"` if you want the original ADF JSON / storage XHTML rather than markdown.
 
 ## Body Formats
 

@@ -219,19 +219,19 @@ export const blogPostTools = [
 
 // Input schemas for validation
 const GetBlogPostsSchema = z.object({
-  spaceId: z.array(z.number()).optional(),
+  spaceId: z.array(z.coerce.number()).optional(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 const GetBlogPostSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   getDraft: z.boolean().optional(),
-  version: z.number().optional(),
+  version: z.coerce.number().optional(),
   includeLabels: z.boolean().optional(),
   includeProperties: z.boolean().optional(),
   includeVersions: z.boolean().optional(),
@@ -248,31 +248,32 @@ const UpdateBlogPostSchema = z.object({
   blogPostId: z.string(),
   title: z.string(),
   body: z.string(),
-  version: z.number(),
+  version: z.coerce.number(),
   status: z.enum(["current", "draft"]).optional(),
   versionMessage: z.string().optional(),
 });
 
 const DeleteBlogPostSchema = z.object({
-  blogPostId: z.number(),
+  blogPostId: z.coerce.number(),
   purge: z.boolean().optional(),
   draft: z.boolean().optional(),
 });
 
 const GetBlogPostsInSpaceSchema = z.object({
-  spaceId: z.number(),
+  spaceId: z.coerce.number(),
   status: z.array(z.string()).optional(),
   title: z.string().optional(),
   bodyFormat: z.enum(["storage", "atlas_doc_format", "view"]).optional(),
   cursor: z.string().optional(),
-  limit: z.number().optional(),
+  limit: z.coerce.number().optional(),
 });
 
 // Tool handlers
 export async function handleBlogPostTool(
   client: ConfluenceClient,
   toolName: string,
-  args: unknown
+  args: unknown,
+  full = false
 ): Promise<unknown> {
   switch (toolName) {
     case "confluence_get_blog_posts": {
@@ -298,7 +299,11 @@ export async function handleBlogPostTool(
       const queryParams: Record<string, string | number | boolean | undefined> =
         {};
 
-      if (input.bodyFormat) queryParams["body-format"] = input.bodyFormat;
+      if (input.bodyFormat) {
+        queryParams["body-format"] = input.bodyFormat;
+      } else if (!full) {
+        queryParams["body-format"] = "atlas_doc_format";
+      }
       if (input.getDraft) queryParams["get-draft"] = input.getDraft;
       if (input.version) queryParams["version"] = input.version;
       if (input.includeLabels) queryParams["include-labels"] = true;

@@ -1,0 +1,62 @@
+{
+  "results": [
+    {
+      "content": {
+        "id": "1001",
+        "type": "page",
+        "status": "current",
+        "title": "Onboarding"
+      },
+      "title": "Onboarding",
+      "excerpt": "Welcome to the @@@hl@@@engineering@@@endhl@@@ onboarding doc...",
+      "url": "/spaces/ENG/pages/1001/Onboarding",
+      "resultGlobalContainer": {
+        "title": "Engineering",
+        "displayUrl": "/spaces/ENG"
+      },
+      "breadcrumbs": [
+        { "label": "Engineering", "url": "/spaces/ENG", "separator": "›" },
+        { "label": "Docs", "url": "/spaces/ENG/pages/100/Docs", "separator": "›" }
+      ],
+      "entityType": "content",
+      "iconCssClass": "aui-icon content-type-page",
+      "lastModified": "2025-01-04T14:22:01.000Z",
+      "friendlyLastModified": "Jan 04, 2025",
+      "score": 0.95
+    },
+    {
+      "content": {
+        "id": "1002",
+        "type": "page",
+        "status": "current",
+        "title": "Architecture Overview"
+      },
+      "title": "Architecture Overview",
+      "excerpt": "The @@@hl@@@architecture@@@endhl@@@ of our system uses microservices.",
+      "url": "/spaces/ENG/pages/1002/Architecture+Overview",
+      "resultGlobalContainer": {
+        "title": "Engineering",
+        "displayUrl": "/spaces/ENG"
+      },
+      "breadcrumbs": [
+        { "label": "Engineering", "url": "/spaces/ENG", "separator": "›" }
+      ],
+      "entityType": "content",
+      "iconCssClass": "aui-icon content-type-page",
+      "lastModified": "2025-01-02T09:00:00.000Z",
+      "friendlyLastModified": "Jan 02, 2025",
+      "score": 0.84
+    }
+  ],
+  "start": 0,
+  "limit": 25,
+  "size": 2,
+  "totalSize": 2,
+  "cqlQuery": "text~\"engineering\"",
+  "searchDuration": 32,
+  "_links": {
+    "self": "https://example.atlassian.net/wiki/rest/api/search?cql=text~%22engineering%22",
+    "base": "https://example.atlassian.net/wiki",
+    "context": "/wiki"
+  }
+}
