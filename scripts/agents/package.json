@@ -15,18 +15,18 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.73",
-    "@ai-sdk/deepseek": "^2.0.31",
+    "@ai-sdk/deepseek": "^2.0.34",
     "@ai-sdk/google": "^3.0.66",
-    "@ai-sdk/groq": "^3.0.37",
+    "@ai-sdk/groq": "^3.0.39",
     "@ai-sdk/mistral": "^3.0.32",
-    "@ai-sdk/openai": "^3.0.55",
-    "@ai-sdk/openai-compatible": "^2.0.43",
-    "@ai-sdk/perplexity": "^3.0.31",
+    "@ai-sdk/openai": "^3.0.63",
+    "@ai-sdk/openai-compatible": "^2.0.47",
+    "@ai-sdk/perplexity": "^3.0.33",
     "@octokit/rest": "^22.0.1",
     "@openrouter/ai-sdk-provider": "^2.9.0",
-    "ai": "^6.0.172",
+    "ai": "^6.0.176",
     "dotenv": "^17.4.2",
-    "zod": "^4.4.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
