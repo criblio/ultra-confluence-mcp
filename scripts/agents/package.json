@@ -1,5 +1,5 @@
 {
-  "name": "confluence-mcp-agents",
+  "name": "ultra-confluence-mcp-agents",
   "version": "1.0.0",
   "description": "AI agents for automated repository maintenance",
   "type": "module",

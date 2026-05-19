@@ -14,7 +14,7 @@ const fixturesDir = resolve(__dirname, "../data/api-fixtures");
 let cacheRoot: string;
 
 beforeAll(async () => {
-  cacheRoot = await mkdtemp(join(tmpdir(), "confluence-mcp-trim-"));
+  cacheRoot = await mkdtemp(join(tmpdir(), "ultra-confluence-mcp-trim-"));
   process.env.CONFLUENCE_BODY_CACHE_DIR = cacheRoot;
 });
 

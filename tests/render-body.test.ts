@@ -9,7 +9,7 @@ import type { ConfluenceClient } from "../src/auth/confluence-client.js";
 let tmpRoot: string;
 
 beforeEach(async () => {
-  tmpRoot = await mkdtemp(join(tmpdir(), "confluence-mcp-render-"));
+  tmpRoot = await mkdtemp(join(tmpdir(), "ultra-confluence-mcp-render-"));
   process.env.CONFLUENCE_BODY_CACHE_DIR = tmpRoot;
 });
 

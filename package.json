@@ -1,9 +1,10 @@
 {
-  "name": "confluence-mcp",
+  "name": "ultra-confluence-mcp",
   "version": "1.0.0",
-  "description": "MCP server for Confluence Cloud - provides AI models with full access to Confluence functionality",
+  "description": "Context-efficient MCP server for Confluence Cloud — trims API responses and offloads large bodies to disk so agents don't burn their context window on Confluence noise.",
   "type": "module",
   "bin": {
+    "ultra-confluence-mcp": "./build/index.js",
     "confluence-mcp": "./build/index.js",
     "confluence-cli": "./build/cli/index.js"
   },

@@ -28,7 +28,7 @@ import {
 // Create the MCP server using the lower-level Server class for more control
 const server = new Server(
   {
-    name: "confluence-mcp",
+    name: "ultra-confluence-mcp",
     version: "1.0.0",
   },
   {
@@ -185,7 +185,7 @@ async function main() {
   // MCP transport from accepting traffic. Errors are logged inside
   // prunePageCache.
   void prunePageCache().catch((err) => {
-    console.error("[confluence-mcp] prunePageCache rejected:", err);
+    console.error("[ultra-confluence-mcp] prunePageCache rejected:", err);
   });
 }
 
