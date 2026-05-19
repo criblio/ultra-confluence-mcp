@@ -13,7 +13,7 @@ import {
 let tmpRoot: string;
 
 beforeEach(async () => {
-  tmpRoot = await mkdtemp(join(tmpdir(), "confluence-mcp-cache-"));
+  tmpRoot = await mkdtemp(join(tmpdir(), "ultra-confluence-mcp-cache-"));
   process.env.CONFLUENCE_BODY_CACHE_DIR = tmpRoot;
 });
 
@@ -28,9 +28,9 @@ describe("getCacheRoot", () => {
     expect(getCacheRoot()).toBe(resolve(tmpRoot));
   });
 
-  it("falls back to os.tmpdir()/confluence-mcp when unset", () => {
+  it("falls back to os.tmpdir()/ultra-confluence-mcp when unset", () => {
     delete process.env.CONFLUENCE_BODY_CACHE_DIR;
-    expect(getCacheRoot()).toBe(join(tmpdir(), "confluence-mcp"));
+    expect(getCacheRoot()).toBe(join(tmpdir(), "ultra-confluence-mcp"));
   });
 });
 

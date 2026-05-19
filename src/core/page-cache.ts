@@ -13,7 +13,7 @@
  *     addressed by id+version, so updates create a new file rather than
  *     overwriting and stale entries are easy to identify.
  *
- * Cache root defaults to `${os.tmpdir()}/confluence-mcp` and can be
+ * Cache root defaults to `${os.tmpdir()}/ultra-confluence-mcp` and can be
  * overridden via `CONFLUENCE_BODY_CACHE_DIR`. Pruning runs on startup
  * and removes files older than `CONFLUENCE_BODY_CACHE_TTL_DAYS` (default
  * 7 days).
@@ -52,7 +52,7 @@ export function getCacheRoot(): string {
   if (override && override.length > 0) {
     return resolve(override);
   }
-  return resolve(join(tmpdir(), "confluence-mcp"));
+  return resolve(join(tmpdir(), "ultra-confluence-mcp"));
 }
 
 function getTtlMs(): number {
@@ -192,7 +192,7 @@ export async function prunePageCache(): Promise<void> {
 
   if (process.env.CONFLUENCE_BODY_CACHE_DEBUG) {
     console.error(
-      `[confluence-mcp] pruning ${root}, cutoff ${new Date(
+      `[ultra-confluence-mcp] pruning ${root}, cutoff ${new Date(
         cutoff
       ).toISOString()}`
     );
@@ -204,7 +204,7 @@ export async function prunePageCache(): Promise<void> {
   } catch (err) {
     // ENOENT on the root is normal (first run); log everything else.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error(`[confluence-mcp] prune readdir(${root}) failed:`, err);
+      console.error(`[ultra-confluence-mcp] prune readdir(${root}) failed:`, err);
     }
     return;
   }
@@ -217,7 +217,7 @@ export async function prunePageCache(): Promise<void> {
         entries = await readdir(dir);
       } catch (err) {
         console.error(
-          `[confluence-mcp] prune readdir(${dir}) failed:`,
+          `[ultra-confluence-mcp] prune readdir(${dir}) failed:`,
           err
         );
         return;
@@ -232,7 +232,7 @@ export async function prunePageCache(): Promise<void> {
             }
           } catch (err) {
             console.error(
-              `[confluence-mcp] prune stat/rm(${path}) failed:`,
+              `[ultra-confluence-mcp] prune stat/rm(${path}) failed:`,
               err
             );
           }

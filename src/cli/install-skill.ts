@@ -24,7 +24,7 @@ description: >-
 Query Confluence from the shell via \`confluence-cli\`. Run it with \`npx\`:
 
 \`\`\`bash
-npx -y -p github:scottlepp/confluence-mcp confluence-cli <tool> [--flag=value ...]
+npx -y -p github:scottlepp/ultra-confluence-mcp confluence-cli <tool> [--flag=value ...]
 \`\`\`
 
 ## First call in a session

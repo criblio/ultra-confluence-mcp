@@ -1,20 +1,133 @@
-# Confluence MCP Server
+# ultra-confluence-mcp
 
-A Model Context Protocol (MCP) server that provides AI models with full access to Confluence Cloud functionality via the REST API v2.
+A Model Context Protocol (MCP) server for Confluence Cloud, designed around one
+question: **how much of the agent's context window does a Confluence call
+actually need to consume?**
+
+Most Confluence MCP servers pass the
+Confluence REST API through more or less verbatim. That's fine for occasional
+use, but a single `getPage` on a long doc can dump 40 KB of ADF JSON into the
+conversation, and a 25-page list response runs over 500 KB. Agents pay that
+cost on every call, and it crowds out the actual work.
+
+This server takes a different stance.
+
+## Why use this over other Confluence/Atlassian MCPs
+
+### 1. Per-call responses are trimmed by ~20× on average
+
+A built-in projection layer drops `_links`, `_expandable`, formatter noise,
+and other fields agents never read, and converts ADF/storage bodies to
+markdown on the way out. Concrete numbers from the benchmark in
+[docs/BENCHMARK.md](docs/BENCHMARK.md):
+
+| call                        |       raw |  trimmed | reduction |
+| --------------------------- | --------: | -------: | --------: |
+| 25-page list (with bodies)  | 526,694 B |  9,753 B |   **54×** |
+| huge page (~39 KB ADF body) |  54,624 B |    479 B |  **114×** |
+| CQL text search ("README")  |  35,341 B | 15,239 B |      2.3× |
+| 11 mixed scenarios combined | 756,483 B | 37,935 B |   **20×** |
+
+### 2. Large bodies offload to disk, not into context
+
+When a page body would exceed the inline limit, the trim layer writes the
+raw API response to a temp file and returns a tiny `bodyPath` reference
+(~500 bytes) instead. Agents that need the content call
+`confluence_render_body` to read from disk — **and can pass `outputPath` to
+write the rendered markdown straight to a file, so the body bytes never
+enter the conversation at all.** Restoring five 10 KB pages costs zero
+context bytes with this path; an MCP that inlines bodies pays ~50 KB.
+
+### 3. The per-conversation tool surface is small and tunable
+
+The MCP tool-list response itself costs context — every conversation pays
+for it up front, before any work happens. With `CONFLUENCE_ENABLED_CATEGORIES`
+you can scope the surface to what an agent actually needs:
+
+| filter                             | tools |  bytes | ~tokens |
+| ---------------------------------- | ----: | -----: | ------: |
+| default (all categories)           |    63 | 49,629 |  12,407 |
+| `page,search,body`                 |    15 | 18,483 |   4,621 |
+| 3 categories minus destructive ops |    12 | 15,691 |   3,923 |
+
+By comparison, many combined Atlassian MCP servers expose over 70 tools across Jira _and_
+Confluence — fine if you want both products, but a lot of schema for an
+agent that just needs to read and write Confluence pages. If you also need
+Jira or Bitbucket, the companion servers
+[ultra-jira-mcp](https://github.com/scottlepp/ultra-jira-mcp) and
+[ultra-bitbucket-mcp](https://github.com/scottlepp/ultra-bitbucket-mcp)
+apply the same trimming philosophy — wire up only the ones you need
+instead of paying for one monolithic Atlassian surface.
+
+### 4. There's a CLI for agents that prefer shelling out
+
+`confluence-cli` is a standalone binary that calls Confluence directly — no
+MCP host required. Same trimmed output shape, plus a `ref: /path` line
+pointing at the full untrimmed response on disk. Per-conversation overhead
+is a single 2.3 KB `SKILL.md` loaded on demand by the Claude Code harness,
+versus ~50 KB of tool schemas. The two paths share all the trim logic, so
+you can mix or switch without behavior drift.
+
+### 5. No Docker, no Python, no runtime to install
+
+It's a Node package. If you already have Node (you probably do — Claude Code
+ships with it), `npx -y https://github.com/scottlepp/ultra-confluence-mcp` is
+the whole install. No container to pull, no Python virtualenv to manage, no
+`uv`/`pipx`/`poetry` to learn first, no `docker run` line with seven `-e`
+flags in your MCP config. Drop the `npx` command into Claude Desktop /
+Claude Code / Cursor and you're done.
+
+### 6. Self-healing — humans aren't the bottleneck
+
+The repo is maintained by a small fleet of bots so updates don't stall
+waiting on a human reviewer:
+
+- **Dependencies stay current.** Dependabot opens grouped PRs on a weekly
+  cadence, and a nightly auto-sync workflow rebases and merges them once
+  CI is green — no manual chasing of patch bumps.
+- **Bug reports get triaged automatically.** A scheduled `bug-fix` agent
+  reads open issues labeled as bugs, validates them against the codebase,
+  implements a fix, and opens a PR. See [scripts/agents/](scripts/agents/).
+- **PRs get a first-pass review without waiting on a human.** Every PR
+  triggers a review agent that flags logic, security, and test-coverage
+  issues so the human reviewer (when there is one) starts from a known
+  baseline.
+
+This matters for a context-efficiency tool specifically: the value
+proposition decays fast if the trim layer falls behind a Confluence API
+change or a CVE in a dependency. Self-healing keeps the surface fresh
+without a maintainer in the loop.
+
+### What this server is NOT
+
+- **Not multi-product.** Jira lives in [ultra-jira-mcp](https://github.com/scottlepp/ultra-jira-mcp) and Bitbucket in [ultra-bitbucket-mcp](https://github.com/scottlepp/ultra-bitbucket-mcp); this server is Confluence Cloud only, by design to keep the tools light.
+- **Not Server/Data Center.** Cloud REST API v2 only.
+- **Not for human-readable conversations.** The trimming is aggressive
+  because agents read JSON, not docs — if you want pretty browser-style
+  output, use the Atlassian web UI.
+
+If you need Jira + Confluence + Bitbucket + Server/DC + OAuth in one server,
+there are MCP servers for that, but you'll pay the price. If your agents
+are blowing through context windows on Confluence reads, use this — and
+pair it with [ultra-jira-mcp](https://github.com/scottlepp/ultra-jira-mcp)
+or [ultra-bitbucket-mcp](https://github.com/scottlepp/ultra-bitbucket-mcp)
+when you need those too.
+
+---
 
 ## Installation
 
 Run directly from GitHub:
 
 ```bash
-npx -y https://github.com/scottlepp/confluence-mcp
+npx -y https://github.com/scottlepp/ultra-confluence-mcp
 ```
 
 Or clone and build locally:
 
 ```bash
-git clone https://github.com/scottlepp/confluence-mcp.git
-cd confluence-mcp
+git clone https://github.com/scottlepp/ultra-confluence-mcp.git
+cd ultra-confluence-mcp
 npm install
 npm run build
 node build/index.js
@@ -32,7 +145,7 @@ export CONFLUENCE_HOST=https://yourcompany.atlassian.net
 export CONFLUENCE_EMAIL=you@example.com
 export CONFLUENCE_API_TOKEN=...
 
-npx -y -p github:scottlepp/confluence-mcp confluence-cli confluence_get_page --pageId=12345
+npx -y -p github:scottlepp/ultra-confluence-mcp confluence-cli confluence_get_page --pageId=12345
 ```
 
 Discovery:
@@ -58,7 +171,7 @@ To make the CLI discoverable to Claude Code agents in standalone
 sessions, install the bundled skill:
 
 ```bash
-npx -y -p github:scottlepp/confluence-mcp confluence-cli install-skill
+npx -y -p github:scottlepp/ultra-confluence-mcp confluence-cli install-skill
 ```
 
 This writes `~/.claude/skills/confluence/SKILL.md`. Use `--force` to
@@ -87,14 +200,14 @@ configs.
 
 Set the following environment variables:
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| CONFLUENCE_HOST | Your Confluence instance URL (e.g., https://yourcompany.atlassian.net) | Yes |
-| CONFLUENCE_EMAIL | Your Atlassian account email | Yes |
-| CONFLUENCE_API_TOKEN | API token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens) | Yes |
-| CONFLUENCE_CLOUD_ID | Cloud ID for scoped tokens (auto-fetched if not provided) | No |
-| CONFLUENCE_ENABLED_CATEGORIES | Comma-separated list of tool categories to enable (default: all) | No |
-| CONFLUENCE_DISABLED_TOOLS | Comma-separated list of specific tools to disable | No |
+| Variable                      | Description                                                                                              | Required |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- | -------- |
+| CONFLUENCE_HOST               | Your Confluence instance URL (e.g., https://yourcompany.atlassian.net)                                   | Yes      |
+| CONFLUENCE_EMAIL              | Your Atlassian account email                                                                             | Yes      |
+| CONFLUENCE_API_TOKEN          | API token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens) | Yes      |
+| CONFLUENCE_CLOUD_ID           | Cloud ID for scoped tokens (auto-fetched if not provided)                                                | No       |
+| CONFLUENCE_ENABLED_CATEGORIES | Comma-separated list of tool categories to enable (default: all)                                         | No       |
+| CONFLUENCE_DISABLED_TOOLS     | Comma-separated list of specific tools to disable                                                        | No       |
 
 ### Tool Filtering
 
@@ -126,7 +239,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "confluence": {
       "command": "npx",
-      "args": ["-y", "https://github.com/scottlepp/confluence-mcp"],
+      "args": ["-y", "https://github.com/scottlepp/ultra-confluence-mcp"],
       "env": {
         "CONFLUENCE_HOST": "https://yourcompany.atlassian.net",
         "CONFLUENCE_EMAIL": "your-email@example.com",
@@ -144,7 +257,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "confluence": {
       "command": "npx",
-      "args": ["-y", "https://github.com/scottlepp/confluence-mcp"],
+      "args": ["-y", "https://github.com/scottlepp/ultra-confluence-mcp"],
       "env": {
         "CONFLUENCE_HOST": "https://yourcompany.atlassian.net",
         "CONFLUENCE_EMAIL": "your-email@example.com",
@@ -270,7 +383,7 @@ When a single-page read returns a body too large to inline, the trim layer offlo
 
 ```json
 {
-  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json"
+  "bodyPath": "/var/folders/.../ultra-confluence-mcp/pages/12345-v3.json"
 }
 ```
 
@@ -278,7 +391,7 @@ When a single-page read returns a body too large to inline, the trim layer offlo
 
 ```json
 {
-  "bodyPath": "/var/folders/.../confluence-mcp/pages/12345-v3.json",
+  "bodyPath": "/var/folders/.../ultra-confluence-mcp/pages/12345-v3.json",
   "outputPath": "/abs/path/to/page.md"
 }
 ```
@@ -315,7 +428,10 @@ Use `bodyFormat: "atlas_doc_format"` when creating/updating pages to insert Forg
   "version": 1,
   "type": "doc",
   "content": [
-    { "type": "paragraph", "content": [{ "type": "text", "text": "Hello world" }] }
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "Hello world" }]
+    }
   ]
 }
 ```
@@ -351,7 +467,9 @@ The ADF document structure (before JSON stringification):
     {
       "type": "codeBlock",
       "attrs": { "language": "mermaid" },
-      "content": [{ "type": "text", "text": "sequenceDiagram\n    Alice->>Bob: Hello" }]
+      "content": [
+        { "type": "text", "text": "sequenceDiagram\n    Alice->>Bob: Hello" }
+      ]
     },
     {
       "type": "extension",
@@ -367,6 +485,7 @@ The ADF document structure (before JSON stringification):
 ```
 
 **Key points:**
+
 - The `extensionKey` is for the **Mermaid diagrams viewer** app by Atlassian Labs (must be installed on your Confluence instance)
 - The `localId` must be in **both** `parameters.localId` AND `attrs.localId`
 - The Mermaid macro auto-detects code blocks by position (1st extension → 1st code block, 2nd → 2nd, etc.)
@@ -375,6 +494,7 @@ The ADF document structure (before JSON stringification):
 ### Finding Extension Keys for Other Forge Apps
 
 To find the extension key for other Forge apps:
+
 1. Manually insert the macro on a Confluence page
 2. Fetch the page with `bodyFormat: "atlas_doc_format"`
 3. Look for the `extensionKey` in the extension node
