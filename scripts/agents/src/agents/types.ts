@@ -41,6 +41,10 @@ export interface ValidationResult {
 // Bug Fix Agent types
 export interface BugFixAgentInput {
   issueNumber?: number;
+  /** Pre-fetched issue title (treated as untrusted text). */
+  issueTitle?: string;
+  /** Pre-fetched issue body (treated as untrusted text). */
+  issueBody?: string;
   maxIssues?: number;
   labels?: string[];
 }
