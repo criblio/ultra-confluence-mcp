@@ -77,26 +77,43 @@ the whole install. No container to pull, no Python virtualenv to manage, no
 flags in your MCP config. Drop the `npx` command into Claude Desktop /
 Claude Code / Cursor and you're done.
 
-### 6. Self-healing — humans aren't the bottleneck
+### 6. Self-healing — humans aren't the bottleneck (without being a security liability)
 
-The repo is maintained by a small fleet of bots so updates don't stall
-waiting on a human reviewer:
+The repo is maintained by bots, so updates don't stall waiting on a human
+reviewer — but every code-modifying step that touches an LLM is gated so a
+malicious issue or PR can't turn the automation into an exfiltration channel:
 
 - **Dependencies stay current.** Dependabot opens grouped PRs on a weekly
-  cadence, and a nightly auto-sync workflow rebases and merges them once
-  CI is green — no manual chasing of patch bumps.
-- **Bug reports get triaged automatically.** A scheduled `bug-fix` agent
-  reads open issues labeled as bugs, validates them against the codebase,
-  implements a fix, and opens a PR. See [scripts/agents/](scripts/agents/).
-- **PRs get a first-pass review without waiting on a human.** Every PR
-  triggers a review agent that flags logic, security, and test-coverage
-  issues so the human reviewer (when there is one) starts from a known
-  baseline.
+  cadence. Patch and minor bumps auto-merge once CI is green. Major bumps
+  fail the workflow and require a human reviewer — the previous behavior of
+  auto-running an LLM "migration agent" on PR code is disabled, because
+  executing PR-supplied code in a privileged context is an RCE pattern.
+- **Bug reports get triaged automatically — when a maintainer approves.**
+  The scheduled `bug-fix` agent only processes issues bearing the
+  `auto-fix-approved` label, which is restricted to maintainers. Issue
+  bodies are treated as untrusted text (boundary-tagged in the prompt,
+  truncated, scanned for shell metacharacters and secret shapes). The agent
+  opens PRs but never auto-merges them; a human still reviews and clicks
+  merge.
+- **PRs get a first-pass review without waiting on a human.** The PR-review
+  agent runs against the diff as data — it never checks out PR code into the
+  workspace where the privileged token bag lives. Agent code is always
+  loaded from `main`.
+- **The agent's tools are sandboxed.** File reads and writes go through a
+  shared path policy that rejects absolute paths, `..` traversal, symlinks
+  pointing outside the working dir, and a denylist that covers `.env*`,
+  `.github/`, `scripts/agents/` itself, lockfiles, key files, and similar
+  high-blast-radius paths. Git and npm commands use `execFile` with argv
+  arrays — no shell interpolation, so model-supplied branch names and
+  commit messages cannot inject `$()` or backticks. See
+  [scripts/agents/src/validation/](scripts/agents/src/validation/) for the
+  policy module and its test coverage.
 
 This matters for a context-efficiency tool specifically: the value
 proposition decays fast if the trim layer falls behind a Confluence API
 change or a CVE in a dependency. Self-healing keeps the surface fresh
-without a maintainer in the loop.
+without a maintainer in the loop — and without giving the loop a way to
+turn into a backdoor.
 
 ### What this server is NOT
 

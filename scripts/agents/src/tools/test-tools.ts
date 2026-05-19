@@ -1,144 +1,122 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { resolveSafePath } from '../validation/safe-path.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
- * Tools for running tests
+ * Tools for running tests / build / lint.
+ *
+ * SECURITY: each tool runs a single fixed `npm` subcommand with an explicit
+ * argv array. The model can choose `runTests`, `runTypeCheck`, `runLint`, or
+ * `installDependencies` — but cannot pass arbitrary commands. There is no
+ * `executeCommand`/`shell` escape hatch by design.
  */
 export function createTestTools(workingDir: string) {
+  async function npm(
+    args: string[],
+    timeoutMs: number
+  ): Promise<{ stdout: string; stderr: string }> {
+    return execFileAsync('npm', args, { cwd: workingDir, timeout: timeoutMs });
+  }
+
   return {
-    /**
-     * Run tests
-     */
     runTests: tool({
       description: 'Run the project test suite',
       inputSchema: z.object({
-        testFile: z.string().optional().describe('Specific test file to run'),
+        testFile: z
+          .string()
+          .optional()
+          .describe('Specific test file to run (path relative to working directory)'),
         coverage: z.boolean().default(false).describe('Run with coverage'),
       }),
       execute: async ({ testFile, coverage }: { testFile?: string; coverage: boolean }) => {
+        const args: string[] = coverage
+          ? ['run', 'test:coverage']
+          : ['test'];
+        if (testFile) {
+          const decision = resolveSafePath(workingDir, testFile);
+          if (!decision.safe) {
+            return { success: false, error: decision.reason };
+          }
+          args.push('--', testFile);
+        }
         try {
-          let command = 'npm test';
-          if (coverage) {
-            command = 'npm run test:coverage';
-          }
-          if (testFile) {
-            command += ` -- ${testFile}`;
-          }
-
-          const { stdout, stderr } = await execAsync(command, {
-            cwd: workingDir,
-            timeout: 300000, // 5 minute timeout
-          });
-
-          return {
-            success: true,
-            output: stdout,
-            stderr,
-          };
+          const { stdout, stderr } = await npm(args, 300_000);
+          return { success: true, output: stdout, stderr };
         } catch (error: unknown) {
-          const execError = error as { stdout?: string; stderr?: string; message?: string };
+          const e = error as { stdout?: string; stderr?: string; message?: string };
           return {
             success: false,
-            error: `Tests failed: ${execError.message || 'Unknown error'}`,
-            output: execError.stdout || '',
-            stderr: execError.stderr || '',
+            error: `Tests failed: ${e.message || 'Unknown error'}`,
+            output: e.stdout || '',
+            stderr: e.stderr || '',
           };
         }
       },
     }),
 
-    /**
-     * Run type checking
-     */
     runTypeCheck: tool({
       description: 'Run TypeScript type checking',
       inputSchema: z.object({}),
       execute: async () => {
         try {
-          const { stdout, stderr } = await execAsync('npm run build -- --noEmit', {
-            cwd: workingDir,
-            timeout: 120000,
-          });
-
-          return {
-            success: true,
-            output: stdout,
-            stderr,
-          };
+          const { stdout, stderr } = await npm(['run', 'build', '--', '--noEmit'], 120_000);
+          return { success: true, output: stdout, stderr };
         } catch (error: unknown) {
-          const execError = error as { stdout?: string; stderr?: string; message?: string };
+          const e = error as { stdout?: string; stderr?: string; message?: string };
           return {
             success: false,
-            error: `Type check failed: ${execError.message || 'Unknown error'}`,
-            output: execError.stdout || '',
-            stderr: execError.stderr || '',
+            error: `Type check failed: ${e.message || 'Unknown error'}`,
+            output: e.stdout || '',
+            stderr: e.stderr || '',
           };
         }
       },
     }),
 
-    /**
-     * Run linting
-     */
     runLint: tool({
       description: 'Run linter on the codebase',
       inputSchema: z.object({
         fix: z.boolean().default(false).describe('Auto-fix issues'),
       }),
       execute: async ({ fix }: { fix: boolean }) => {
+        const args = ['run', 'lint'];
+        if (fix) args.push('--', '--fix');
         try {
-          const command = fix ? 'npm run lint -- --fix' : 'npm run lint';
-          const { stdout, stderr } = await execAsync(command, {
-            cwd: workingDir,
-            timeout: 120000,
-          });
-
-          return {
-            success: true,
-            output: stdout,
-            stderr,
-          };
+          const { stdout, stderr } = await npm(args, 120_000);
+          return { success: true, output: stdout, stderr };
         } catch (error: unknown) {
-          const execError = error as { stdout?: string; stderr?: string; message?: string };
+          const e = error as { stdout?: string; stderr?: string; message?: string };
           return {
             success: false,
-            error: `Lint failed: ${execError.message || 'Unknown error'}`,
-            output: execError.stdout || '',
-            stderr: execError.stderr || '',
+            error: `Lint failed: ${e.message || 'Unknown error'}`,
+            output: e.stdout || '',
+            stderr: e.stderr || '',
           };
         }
       },
     }),
 
-    /**
-     * Install dependencies
-     */
     installDependencies: tool({
-      description: 'Install npm dependencies',
+      description: 'Install npm dependencies from package-lock.json (uses npm ci, never npm install)',
       inputSchema: z.object({}),
       execute: async () => {
         try {
-          const { stdout, stderr } = await execAsync('npm install', {
-            cwd: workingDir,
-            timeout: 300000,
-          });
-
-          return {
-            success: true,
-            output: stdout,
-            stderr,
-          };
+          // `npm ci` is reproducible and refuses to modify the lockfile.
+          // `npm install` would let a tampered registry response rewrite
+          // dependencies; we don't grant that capability to the agent.
+          const { stdout, stderr } = await npm(['ci'], 300_000);
+          return { success: true, output: stdout, stderr };
         } catch (error: unknown) {
-          const execError = error as { stdout?: string; stderr?: string; message?: string };
+          const e = error as { stdout?: string; stderr?: string; message?: string };
           return {
             success: false,
-            error: `Install failed: ${execError.message || 'Unknown error'}`,
-            output: execError.stdout || '',
-            stderr: execError.stderr || '',
+            error: `Install failed: ${e.message || 'Unknown error'}`,
+            output: e.stdout || '',
+            stderr: e.stderr || '',
           };
         }
       },
