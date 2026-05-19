@@ -2,13 +2,21 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { Octokit } from '@octokit/rest';
 import { getConfig } from '../config.js';
+import { SafetyChecker } from '../validation/safety-checker.js';
 
 /**
  * GitHub tools for interacting with the GitHub API
+ *
+ * SECURITY: tools that publish model-authored text (PR title/body, review
+ * body, issue comments) run that text through `SafetyChecker.checkPRMetadata`
+ * first. Rejected calls return `{ success: false, error: ... }` so the model
+ * sees the rejection and can retry with sanitized content rather than the
+ * agent loop silently failing.
  */
 export function createGitHubTools(repoOwner: string, repoName: string) {
   const config = getConfig();
   const octokit = new Octokit({ auth: config.githubToken });
+  const safetyChecker = new SafetyChecker();
 
   return {
     /**
@@ -105,6 +113,10 @@ export function createGitHubTools(repoOwner: string, repoName: string) {
         body: z.string().describe('Comment body'),
       }),
       execute: async ({ issueNumber, body }: { issueNumber: number; body: string }) => {
+        const check = safetyChecker.checkPRMetadata({ body });
+        if (!check.safe) {
+          return { success: false, error: `Comment rejected: ${check.reason}` };
+        }
         try {
           const { data } = await octokit.issues.createComment({
             owner: repoOwner,
@@ -139,6 +151,18 @@ export function createGitHubTools(repoOwner: string, repoName: string) {
         base: z.string().default('main').describe('Base branch'),
       }),
       execute: async ({ title, body, head, base }: { title: string; body: string; head: string; base: string }) => {
+        const check = safetyChecker.checkPRMetadata({
+          title,
+          body,
+          branchName: head,
+        });
+        if (!check.safe) {
+          return { success: false, error: `PR rejected: ${check.reason}` };
+        }
+        const baseCheck = safetyChecker.checkPRMetadata({ branchName: base });
+        if (!baseCheck.safe) {
+          return { success: false, error: `Base branch rejected: ${baseCheck.reason}` };
+        }
         try {
           const { data } = await octokit.pulls.create({
             owner: repoOwner,
@@ -189,6 +213,26 @@ export function createGitHubTools(repoOwner: string, repoName: string) {
         comments?: Array<{ path: string; line: number; body: string }>;
         enableAutoMerge?: boolean;
       }) => {
+        const bodyCheck = safetyChecker.checkPRMetadata({ body });
+        if (!bodyCheck.safe) {
+          return { success: false, error: `Review body rejected: ${bodyCheck.reason}` };
+        }
+        for (const c of comments ?? []) {
+          const ck = safetyChecker.checkPRMetadata({ body: c.body });
+          if (!ck.safe) {
+            return { success: false, error: `Inline comment rejected (${c.path}:${c.line}): ${ck.reason}` };
+          }
+        }
+        // Auto-merge by the agent requires an explicit opt-in via env. The
+        // bug-fix workflow sets AUTO_MERGE=false, so this stays off unless a
+        // maintainer flips it deliberately.
+        const autoMergeAllowed = process.env.AUTO_MERGE === 'true';
+        if (enableAutoMerge && !autoMergeAllowed) {
+          return {
+            success: false,
+            error: 'Auto-merge is disabled (AUTO_MERGE env var is not "true"). The agent must not merge without human approval.',
+          };
+        }
         try {
           const { data } = await octokit.pulls.createReview({
             owner: repoOwner,
@@ -265,6 +309,17 @@ export function createGitHubTools(repoOwner: string, repoName: string) {
         ref: z.string().optional().describe('Branch, tag, or commit SHA'),
       }),
       execute: async ({ path, ref }: { path: string; ref?: string }) => {
+        // Mirror the local filesystem path policy when reading from GitHub —
+        // we don't want the agent fetching `.github/workflows/...` or
+        // `scripts/agents/...` over the API to bypass file-tools.ts.
+        const { isProtectedPath } = await import('../validation/safe-path.js');
+        if (isProtectedPath(path)) {
+          return {
+            success: false,
+            error: `Refusing to fetch protected path from repo: ${path}`,
+            path,
+          };
+        }
         try {
           const { data } = await octokit.repos.getContent({
             owner: repoOwner,
